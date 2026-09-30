@@ -10,7 +10,7 @@ const pick = (arr) => arr[Math.random() * arr.length | 0];
 
 const STORE_KEY = 'workshop-party-show';
 const S = (() => {
-  const def = { teams: [{ name: 'A팀', score: 0 }, { name: 'B팀', score: 0 }], penalties: DEFAULT_PENALTIES.slice() };
+  const def = { teams: [{ name: 'A팀', score: 0 }, { name: 'B팀', score: 0 }], penalties: DEFAULT_PENALTIES.slice(), set: 1 };
   try { return Object.assign(def, JSON.parse(localStorage.getItem(STORE_KEY)) || {}); } catch (e) { return def; }
 })();
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* 저장 불가 환경 */ } }
@@ -246,7 +246,7 @@ const AUDIO_QUIZ = {
   ost: {
     title: '🎬 OST 퀴즈', sub: '어떤 드라마·영화일까?',
     filters: ['전체', '드라마', '영화'],
-    list: (f) => (f && f !== '전체' ? OST.filter((s) => s.type === f) : OST),
+    list: ostList,
     answer: (s) => s.work, detail: (s) => `${s.song} - ${s.artist}`,
     hints: [{ label: '장르·연도 힌트', text: (s) => `${s.type} · ${s.year}` }, { label: '초성 힌트', big: true, text: (s) => chosung(s.work) }],
   },
@@ -254,7 +254,8 @@ const AUDIO_QUIZ = {
 screens.music = (kind = 'music') => {
   const Q = AUDIO_QUIZ[kind];
   let filter = Q.filters ? Q.filters[0] : null, list = Q.list(filter);
-  let order = shuffle(range(list.length));
+  const orderFor = (f) => seededOrder(list.length, kind + (f ? ':' + f : ''), S.set);
+  let order = orderFor(filter);
   let i = 0, hint = 0, revealed = false, playing = false;
   const song = () => list[order[i]];
 
@@ -306,7 +307,7 @@ screens.music = (kind = 'music') => {
   const move = (d) => { stopClip(); i = (i + d + list.length) % list.length; hint = 0; revealed = false; render(); cueSong(song()); };
 
   actions = {
-    filter: (f) => { stopClip(); filter = f; list = Q.list(f); order = shuffle(range(list.length)); i = 0; hint = 0; revealed = false; render(); cueSong(song()); },
+    filter: (f) => { stopClip(); filter = f; list = Q.list(f); order = orderFor(f); i = 0; hint = 0; revealed = false; render(); cueSong(song()); },
     clip: (v) => { setProg(0); playClip(song(), Number(v), setProg); },
     full: () => { setProg(1); playClip(song(), 0); },
     stop: () => stopClip(),
@@ -328,8 +329,8 @@ screens.chosung = () => {
   let cat = '전체', pool = [], i = 0, keep = 0, revealed = false, stopTimer = null;
 
   function build() {
-    const src = cat === '전체' ? Object.entries(CHOSUNG) : [[cat, CHOSUNG[cat]]];
-    pool = shuffle(src.flatMap(([c, ws]) => ws.map((w) => ({ c, w }))));
+    const src = chosungList(cat);
+    pool = seededOrder(src.length, 'chosung:' + cat, S.set).map((k) => src[k]);
     i = 0; keep = 0; revealed = false;
   }
   const pts = () => Math.max(1, 3 - keep);
@@ -379,7 +380,7 @@ screens.chosung = () => {
 // ── 📸 확대 사진 퀴즈 ──
 screens.photo = () => {
   const SCALES = [7, 4, 2.2, 1], POINTS = [4, 3, 2, 1];
-  const order = shuffle(range(CELEBS.length));
+  const order = seededOrder(CELEBS.length, 'photo', S.set);
   let i = 0, stage = 0, revealed = false;
   const cur = () => CELEBS[order[i]];
   const preload = (k) => { const c = CELEBS[order[k % order.length]]; if (c) new Image().src = 'img/' + c.file; };
@@ -686,7 +687,7 @@ screens.bomb = () => {
 
 // ── 🔥 올인 역전 ──
 screens.allin = () => {
-  const order = shuffle(range(ALLIN.length));
+  const order = seededOrder(ALLIN.length, 'allin', S.set);
   let qi = 0, bets = [0, 0], result = [null, null];
   const max = (t) => Math.max(0, S.teams[t].score);
 
@@ -856,6 +857,11 @@ screens.settings = () => {
           <input id="n0" value="${esc(S.teams[0].name)}" maxlength="10">
           <input id="n1" value="${esc(S.teams[1].name)}" maxlength="10">
         </div>
+        <label>문제 세트 번호 (정답지와 같은 번호여야 순서가 맞아요)</label>
+        <div class="row" style="flex-wrap:nowrap;justify-content:flex-start">
+          <input id="set" type="number" min="1" max="999" inputmode="numeric" value="${S.set}" style="max-width:120px">
+          <a class="btn gold" href="answers.html?set=${S.set}" target="_blank" rel="noopener" style="text-decoration:none">📋 정답지 열기</a>
+        </div>
         <label>벌칙 룰렛 항목 (한 줄에 하나)</label>
         <textarea id="pen">${esc(S.penalties.join('\n'))}</textarea>
         <div class="row">
@@ -870,6 +876,8 @@ screens.settings = () => {
       S.teams[0].name = $('#n0').value.trim() || 'A팀';
       S.teams[1].name = $('#n1').value.trim() || 'B팀';
       S.penalties = $('#pen').value.split('\n').map((s) => s.trim()).filter(Boolean);
+      S.set = Math.max(1, parseInt($('#set').value, 10) || 1);
+      document.querySelector('a[href^="answers.html"]').href = 'answers.html?set=' + S.set;
       save(); renderScore(); sfx.ok(); toast('저장했어요');
     },
     resetPen: () => { $('#pen').value = DEFAULT_PENALTIES.join('\n'); },
