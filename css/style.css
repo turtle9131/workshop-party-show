@@ -63,6 +63,7 @@ input, textarea { font-family: inherit; }
 @media (orientation: portrait) { .grid { grid-template-columns: repeat(2, 1fr); } }
 @media (orientation: landscape) and (max-height: 500px) {
   .grid { grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  #main { padding-top: 8px; }
   .card { padding: 8px 6px; gap: 2px; }
   .card .ic { font-size: 26px; }
   .card .d { display: none; }
@@ -187,6 +188,28 @@ input, textarea { font-family: inherit; }
 .wheel-box .pin { position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 0; height: 0;
   border-left: 16px solid transparent; border-right: 16px solid transparent; border-top: 30px solid var(--gold); filter: drop-shadow(0 2px 3px #000); }
 .result-big { font-family: var(--title); font-size: clamp(28px, 8vmin, 60px); color: var(--gold); }
+
+/* ── 팀 나누기 ── */
+.names { flex: 1; width: 100%; min-height: 160px; resize: none; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, .3); color: var(--text); font-size: 17px; line-height: 1.5; user-select: text; -webkit-user-select: text; }
+.tboard { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 10px; }
+.tcol { border-radius: var(--radius); border: 2px solid; padding: 8px; display: flex; flex-direction: column; gap: 5px; overflow-y: auto; background: rgba(0, 0, 0, .25); }
+.tcol.A { border-color: var(--A); }
+.tcol.B { border-color: var(--B); }
+.tname { font-family: var(--title); font-size: clamp(18px, 4.4vmin, 30px); text-align: center; }
+.tname small { font-family: var(--ui); font-size: 13px; color: var(--muted); }
+.tcol.A .tname { color: var(--A); }
+.tcol.B .tname { color: var(--B); }
+.tmember { text-align: center; font-weight: 800; font-size: clamp(15px, 3.6vmin, 24px); padding: 4px; border-radius: 8px; background: var(--panel); }
+.tcenter { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-width: 0; }
+.tactions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 280px; }
+.slot { font-family: var(--title); font-size: clamp(30px, 10vmin, 76px); text-align: center; word-break: keep-all; min-height: 1.2em; }
+.slot.A { color: var(--A); text-shadow: 0 0 24px var(--A); }
+.slot.B { color: var(--B); text-shadow: 0 0 24px var(--B); }
+@media (orientation: portrait) {
+  .tboard { grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr; }
+  .tcenter { grid-column: 1 / -1; grid-row: 1; }
+}
 
 /* ── 설정 ── */
 .form { display: grid; gap: 10px; max-width: 640px; width: 100%; margin: 0 auto; }

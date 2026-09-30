@@ -178,6 +178,7 @@ function chosung(str, keep = 0) {
 
 // ═══════════════════════ 화면들 ═══════════════════════
 const GAMES = [
+  { key: 'teams', ic: '🎲', t: '팀 나누기', d: '운명의 A팀 vs B팀' },
   { key: 'music', ic: '🎵', t: '1초 노래 퀴즈', d: '전주 듣고 맞히기' },
   { key: 'ost', ic: '🎬', t: 'OST 퀴즈', d: '드라마·영화 맞히기' },
   { key: 'chosung', ic: '🔤', t: '초성 퀴즈', d: 'ㅇㅈㅇ ㄱㅇ?' },
@@ -321,6 +322,111 @@ screens.music = (kind = 'music') => {
 };
 
 screens.ost = () => screens.music('ost');
+
+// ── 🎲 팀 나누기 ──
+screens.teams = () => {
+  const parse = (txt) => [...new Set(txt.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))];
+
+  function setup() {
+    const players = S.players || [];
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🎲 팀 나누기</h2><span class="sub">참가자 이름을 한 줄에 한 명씩</span></div>
+        <div class="stage-wrap">
+          <div class="stage" style="align-items:stretch">
+            <textarea id="names" class="names" placeholder="예)&#10;김철수&#10;이영희&#10;박민수">${esc(players.join('\n'))}</textarea>
+          </div>
+          <div class="controls">
+            <div class="pill" id="cnt" style="text-align:center">${players.length}명</div>
+            <button class="btn big primary" data-a="draw">🎲 팀 뽑기 시작!</button>
+            ${S.roster ? '<button class="btn" data-a="last">📋 지난 결과 보기</button>' : ''}
+          </div>
+        </div>
+      </div>`;
+    const ta = $('#names');
+    ta.addEventListener('input', () => { $('#cnt').textContent = parse(ta.value).length + '명'; });
+    actions = {
+      draw: () => {
+        const names = parse(ta.value);
+        if (names.length < 2) { toast('2명 이상 입력해 주세요'); return; }
+        S.players = names; save(); draw(names);
+      },
+      last: () => result(S.roster, true),
+    };
+  }
+
+  function board(teams, current, curTeam) {
+    const col = (t) => `
+      <div class="tcol ${t ? 'B' : 'A'}">
+        <div class="tname">${esc(S.teams[t].name)} <small>${teams[t].length}명</small></div>
+        ${teams[t].map((n, k) => `<div class="tmember ${k === teams[t].length - 1 && curTeam === t ? 'pop' : ''}">${esc(n)}</div>`).join('')}
+      </div>`;
+    return `
+      <div class="tboard">
+        ${col(0)}
+        <div class="tcenter">
+          <div class="slot ${curTeam === 0 ? 'A' : curTeam === 1 ? 'B' : ''}" id="slot">${esc(current || '')}</div>
+          <div class="tactions" id="tact"></div>
+        </div>
+        ${col(1)}
+      </div>`;
+  }
+
+  function draw(names) {
+    // 공정하게 반반: 섞은 뒤 번갈아 배정, 어느 팀이 한 명 더 받을지도 무작위
+    const order = shuffle(names), first = Math.random() < 0.5 ? 0 : 1;
+    const assign = order.map((n, k) => ({ n, t: (k + first) % 2 }));
+    const teams = [[], []];
+    let k = 0, skip = false, timers = [];
+    const later = (fn, ms) => { const id = setTimeout(fn, ms); timers.push(id); };
+    onCleanup(() => timers.forEach(clearTimeout));
+
+    main.innerHTML = `<div class="screen">${board(teams)}</div>`;
+    $('#tact').innerHTML = '<button class="btn" data-a="skip">⏩ 한 번에 공개</button>';
+    actions = { skip: () => { skip = true; } };
+
+    function next() {
+      if (k >= assign.length) return result(teams, false);
+      if (skip) { assign.slice(k).forEach((a) => teams[a.t].push(a.n)); k = assign.length; return next(); }
+      const { n, t } = assign[k];
+      const remain = assign.slice(k).map((a) => a.n);
+      // 슬롯머신처럼 이름이 돌다가 멈춤
+      let spins = 0; const total = 10;
+      const spin = () => {
+        if (skip) return next();
+        const slot = $('#slot'); if (!slot) return;
+        if (spins < total) { slot.textContent = pick(remain); slot.className = 'slot'; sfx.tick(); spins++; later(spin, 30 + spins * 10); return; }
+        slot.textContent = n; slot.className = 'slot pop ' + (t ? 'B' : 'A');
+        sfx.ok(); flash(t ? 'var(--B)' : 'var(--A)');
+        later(() => {
+          teams[t].push(n); k++;
+          const tact = $('#tact').innerHTML;
+          main.innerHTML = `<div class="screen">${board(teams, n, t)}</div>`;
+          $('#tact').innerHTML = tact;
+          later(next, 350);
+        }, 600);
+      };
+      spin();
+    }
+    later(next, 300);
+  }
+
+  function result(teams, fromSaved) {
+    if (!fromSaved) { S.roster = teams; save(); sfx.fanfare(); }
+    main.innerHTML = `<div class="screen">${board(teams, '⚔️ VS ⚔️')}</div>`;
+    $('#tact').innerHTML = `
+      <button class="btn big primary" data-a="home">✅ 이대로 시작!</button>
+      <button class="btn" data-a="again">🔁 다시 뽑기</button>
+      <button class="btn" data-a="edit">✏️ 명단 수정</button>`;
+    actions = {
+      home: () => go('home'),
+      again: () => draw(S.players || [...teams[0], ...teams[1]]),
+      edit: () => setup(),
+    };
+  }
+
+  setup();
+};
 
 // ── 🔤 초성 퀴즈 ──
 screens.chosung = () => {
