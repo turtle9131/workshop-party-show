@@ -18,11 +18,11 @@ const SONGS = [
   { artist: '싸이', title: '강남스타일', year: 2012, id: 'y5ggaJEyhzU', start: 0 },
   { artist: '버스커 버스커', title: '벚꽃 엔딩', year: 2012, id: 'jrYIZ9VgmKo', start: 0 },
   { artist: '티아라', title: 'Roly-Poly', year: 2011, id: 'Pws7laZhyP0', start: 0 },
-  { artist: '2PM', title: 'Again & Again', year: 2009, id: '3OyaP7oRm_k', start: 0 },
-  { artist: '미쓰에이', title: 'Bad Girl Good Girl', year: 2010, id: 'CS8yIm5yvjc', start: 0 },
-  { artist: '씨스타', title: 'Touch My Body', year: 2014, id: 'VLi1iVUWN7Q', start: 0 },
-  { artist: '에픽하이', title: 'Fly', year: 2005, id: 'sHqLlyBlmQI', start: 0 },
-  { artist: 'SG워너비', title: '내 사람', year: 2007, id: 'G5hbOrbfSRY', start: 0 },
+  { artist: '로제 & Bruno Mars', title: 'APT.', year: 2024, id: 'qzDJnlrqNyo', start: 0 },
+  { artist: 'HUNTR/X (케이팝 데몬 헌터스)', title: 'Golden', year: 2025, id: 'fPLAgY5bU1Y', start: 0 },
+  { artist: 'G-DRAGON', title: 'HOME SWEET HOME', year: 2024, id: 'fLi0EJfi_vg', start: 0 },
+  { artist: '우즈 (WOODZ)', title: 'Drowning', year: 2023, id: 'NbKH4iZqq1Y', start: 0 },
+  { artist: '에스파', title: 'Supernova', year: 2024, id: 'bkGaDgcDn5I', start: 0 },
   { artist: '브라운아이드걸스', title: 'Abracadabra', year: 2009, id: 'MQqDrgkf8-I', start: 0 },
   { artist: '비', title: '레이니즘', year: 2008, id: 'cRFhSOH2Q9U', start: 0 },
   { artist: '이효리', title: '10 Minutes', year: 2003, id: 'AUXYUFbpD_M', start: 0 },
@@ -36,8 +36,8 @@ const SONGS = [
   { artist: 'TWICE', title: 'CHEER UP', year: 2016, id: '0a1zTx1R0KE', start: 0 },
   { artist: '방탄소년단', title: '불타오르네', year: 2016, id: 'ZbWo60LyvXc', start: 0 },
   { artist: 'iKON', title: '사랑을 했다', year: 2018, id: 'pd9ijpnkD-Y', start: 0 },
-  { artist: '포미닛', title: 'Hot Issue', year: 2009, id: 'c0t3FpVWLJ8', start: 0 },
-  { artist: '엠씨더맥스', title: '사랑의 시', year: 2002, id: 'm4vcZuKV7Jc', start: 0 },
+  { artist: '황가람', title: '나는 반딧불', year: 2024, id: 'xL_cd1DJan8', start: 0 },
+  { artist: '코르티스 (CORTIS)', title: 'REDRED', year: 2026, id: 'llsR2eTdlI4', start: 0 },
 ];
 
 // ── 🎬 OST 퀴즈 ──────────────────────────────────────────────
