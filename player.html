@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d0b1e">
+  <meta name="robots" content="noindex">
+  <title>마피아 역할 확인</title>
+  <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=11">
+</head>
+<body>
+  <main id="main"></main>
+
+  <script src="js/data.js?v=11"></script>
+  <script src="js/order.js?v=11"></script>
+  <script src="js/mafia.js?v=11"></script>
+  <script>
+    'use strict';
+    const main = document.getElementById('main');
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    let g = null;
+    try { g = decodeGame(new URLSearchParams(location.search).get('g') || ''); } catch (e) { g = null; }
+
+    if (!g || !Array.isArray(g.n)) {
+      main.innerHTML = `<div class="screen" style="justify-content:center;text-align:center">
+        <div class="result-big">😵 링크가 올바르지 않아요</div>
+        <p class="sub" style="color:var(--muted)">TV 화면의 QR 코드를 다시 찍거나, 단톡방 링크를 다시 눌러 주세요.</p></div>`;
+    } else {
+      const roles = mafiaRoles(g);
+      const KEY = 'mafia-me-' + g.c;
+      let me = null;
+      try { const v = localStorage.getItem(KEY); if (v !== null) me = Number(v); } catch (e) { /* 저장 불가 */ }
+      if (!(me >= 0 && me < g.n.length)) me = null;
+      me === null ? pickName() : showRole();
+
+      function pickName() {
+        main.innerHTML = `
+          <div class="screen">
+            <div class="head"><h2>🕵️ 마피아 게임</h2><span class="pill">코드 ${esc(g.c)}</span></div>
+            <p class="notice" style="margin:0">본인 이름을 눌러 주세요</p>
+            <p class="sub" style="margin:0;color:var(--muted)">다른 사람 이름을 누르면 반칙이에요 🙅</p>
+            <div class="ngrid" style="justify-content:flex-start">
+              ${g.n.map((nm, k) => `<button class="nbtn" data-k="${k}">${esc(nm)}</button>`).join('')}
+            </div>
+          </div>`;
+        main.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => {
+          const k = Number(b.dataset.k);
+          if (!confirm(`${g.n[k]} 님이 맞나요?`)) return;
+          me = k;
+          try { localStorage.setItem(KEY, String(k)); } catch (e) { /* 저장 불가 */ }
+          showRole();
+        }));
+      }
+
+      function showRole() {
+        const r = roles[me], info = ROLES[r];
+        const mates = r === 'mafia' ? g.n.filter((_, k) => k !== me && roles[k] === 'mafia') : [];
+        main.innerHTML = `
+          <div class="screen">
+            <div class="head"><h2>${esc(g.n[me])} 님</h2><span class="pill">코드 ${esc(g.c)}</span></div>
+            <div class="role-card" id="card">
+              <div class="cover">👆<br>꾹 누르고 있는 동안만<br>내 역할이 보여요</div>
+              <div class="inner">
+                <div class="role-ic">${info.ic}</div>
+                <div class="result-big">${info.n}</div>
+                <p class="role-d">${esc(info.d)}</p>
+                ${r === 'mafia' ? `<p class="notice" style="margin:8px 0 0">동료 마피아: ${mates.length ? mates.map(esc).join(', ') : '없음 (혼자예요)'}</p>` : ''}
+              </div>
+            </div>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">주변 사람에게 화면이 보이지 않게 조심하세요.</p>
+            <button class="btn" id="re">이름을 잘못 골랐어요</button>
+          </div>`;
+        const card = document.getElementById('card');
+        const on = (e) => { e.preventDefault(); card.classList.add('show'); };
+        const off = () => card.classList.remove('show');
+        card.addEventListener('pointerdown', on);
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => card.addEventListener(ev, off));
+        card.addEventListener('contextmenu', (e) => e.preventDefault());
+        document.getElementById('re').addEventListener('click', () => {
+          if (!confirm('이름을 다시 고를까요?')) return;
+          try { localStorage.removeItem(KEY); } catch (e) { /* 저장 불가 */ }
+          me = null; pickName();
+        });
+      }
+    }
+  </script>
+</body>
+</html>

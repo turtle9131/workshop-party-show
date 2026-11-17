@@ -187,6 +187,7 @@ const GAMES = [
   { key: 'draw', ic: '🎨', t: '캐치마인드', d: '릴레이 그림 퀴즈' },
   { key: 'bomb', ic: '💣', t: '폭탄 돌리기', d: '터지면 벌칙!' },
   { key: 'allin', ic: '🔥', t: '올인 역전', d: '마지막 대역전' },
+  { key: 'mafia', ic: '🕵️', t: '마피아', d: '사회자 진행' },
   { key: 'roulette', ic: '🎰', t: '벌칙 룰렛', d: '운명의 룰렛' },
 ];
 
@@ -950,6 +951,311 @@ screens.roulette = () => {
       raf = requestAnimationFrame(step);
     },
   };
+};
+
+// ── 🕵️ 마피아 (사회자 진행) ──
+// 진행 폰은 TV에 미러링되므로 역할을 화면에 띄우지 않습니다. 역할은 각자 폰(player.html)에서 확인합니다.
+screens.mafia = () => {
+  if (S.tts === undefined) S.tts = true;
+  const parseNames = (txt) => [...new Set(txt.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))];
+  const newCode = () => String(1000 + Math.random() * 9000 | 0);
+  const fmt = (s) => `${s / 60 | 0}:${String(s % 60).padStart(2, '0')}`;
+  // 음성 안내는 순서대로 이어서 읽도록 큐에 쌓음
+  const say = (t) => {
+    if (!S.tts || !window.speechSynthesis) return;
+    try { const u = new SpeechSynthesisUtterance(t); u.lang = 'ko-KR'; u.rate = 0.95; speechSynthesis.speak(u); } catch (e) { /* 미지원 */ }
+  };
+  const hush = () => { try { speechSynthesis.cancel(); } catch (e) { /* 미지원 */ } };
+  onCleanup(hush);
+
+  let M = S.mafia || null, stopTimer = null;
+  const persist = () => { S.mafia = M; save(); };
+  const stopT = () => { if (stopTimer) { stopTimer(); stopTimer = null; } };
+  onCleanup(stopT);
+  const roles = () => mafiaRoles(M.g);
+  const aliveIdx = () => M.g.n.map((_, k) => k).filter((k) => M.alive[k]);
+  const pickGrid = (sel) => `<div class="ngrid">${aliveIdx().map((k) => `<button class="nbtn ${sel === k ? 'on' : ''}" data-a="sel" data-v="${k}">${esc(M.g.n[k])}</button>`).join('')}</div>`;
+  const roleTag = (k) => { const r = ROLES[roles()[k]]; return `${r.ic} ${r.n}`; };
+  function checkWin() {
+    const r = roles(); let ma = 0, ot = 0;
+    M.alive.forEach((a, k) => { if (a) r[k] === 'mafia' ? ma++ : ot++; });
+    return ma === 0 ? 'citizen' : ma >= ot ? 'mafia' : null;
+  }
+
+  // ── 준비 ──
+  function setup() {
+    stopT();
+    let txt = ((M && M.g.n) || S.players || []).join('\n');
+    let m = M ? M.g.m : 0, p = M ? M.g.p : 1, d = M ? M.g.d : 1, reveal = M ? !!M.reveal : false;
+    const autoM = (n) => (n <= 6 ? 1 : n <= 11 ? 2 : 3);
+    const summary = () => {
+      const n = parseNames(txt).length, mm = m || autoM(n);
+      return { n, mm, text: `${n}명 · 🔪마피아 ${mm} · 🚓경찰 ${p} · 💉의사 ${d} · 🙂시민 ${n - mm - p - d}` };
+    };
+    function draw() {
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>🕵️ 마피아 · 준비</h2><span class="sub">사회자는 명단에서 빼 주세요</span></div>
+          <div class="stage-wrap">
+            <div class="stage" style="align-items:stretch">
+              <textarea id="names" class="names" placeholder="참가자 이름 (한 줄에 한 명)">${esc(txt)}</textarea>
+            </div>
+            <div class="controls">
+              <div class="pill" id="sum" style="text-align:center">${summary().text}</div>
+              <div class="row"><button class="btn" data-a="m" data-v="-1">마피아 −</button><button class="btn" data-a="m" data-v="1">마피아 ＋</button></div>
+              <div class="row"><button class="btn ${p ? 'on' : ''}" data-a="p">🚓 경찰 ${p ? 'ON' : 'OFF'}</button><button class="btn ${d ? 'on' : ''}" data-a="d">💉 의사 ${d ? 'ON' : 'OFF'}</button></div>
+              <div class="row"><button class="btn ${reveal ? 'on' : ''}" data-a="reveal">탈락 시 직업 공개 ${reveal ? 'ON' : 'OFF'}</button><button class="btn ${S.tts ? 'on' : ''}" data-a="tts">🔊 음성 ${S.tts ? 'ON' : 'OFF'}</button></div>
+              ${M && !M.over ? '<button class="btn gold" data-a="resume">▶ 진행 중이던 게임 이어서</button>' : ''}
+              <button class="btn big primary" data-a="create">🎲 역할 배정하기</button>
+            </div>
+          </div>
+        </div>`;
+      $('#names').addEventListener('input', (e) => { txt = e.target.value; $('#sum').textContent = summary().text; });
+    }
+    actions = {
+      m: (v) => { const { n, mm } = summary(); m = Math.max(1, Math.min(Math.max(1, Math.ceil(n / 2) - 1), mm + Number(v))); draw(); },
+      p: () => { p = p ? 0 : 1; draw(); },
+      d: () => { d = d ? 0 : 1; draw(); },
+      reveal: () => { reveal = !reveal; draw(); },
+      tts: () => { S.tts = !S.tts; save(); draw(); if (S.tts) say('음성 안내를 켰습니다.'); },
+      resume: () => (M.phase === 'night' ? night() : M.phase === 'day' ? day() : join()),
+      create: () => {
+        const names = parseNames(txt), { n, mm } = summary();
+        if (n < 4) { toast('4명 이상 입력해 주세요'); return; }
+        if (mm >= n - mm) { toast('마피아가 너무 많아요'); return; }
+        if (n - mm - p - d < 0) { toast('인원보다 역할이 많아요'); return; }
+        M = { g: { c: newCode(), n: names, m: mm, p, d }, alive: names.map(() => true), day: 1, reveal, over: null, phase: 'join' };
+        S.players = names; persist(); sfx.ok(); join();
+      },
+    };
+    draw();
+  }
+
+  // ── 역할 확인 (QR) ──
+  function join() {
+    stopT(); M.phase = 'join'; persist();
+    const url = new URL('player.html?g=' + encodeGame(M.g), location.href).href;
+    let qr = '';
+    try { const q = qrcode(0, 'M'); q.addData(url); q.make(); qr = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); } catch (e) { qr = ''; }
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🕵️ 역할 확인</h2><span class="pill">게임 코드 ${M.g.c}</span></div>
+        <div class="stage-wrap">
+          <div class="stage">${qr ? `<div class="qr">${qr}</div>` : `<div class="sub" style="word-break:break-all">${esc(url)}</div>`}</div>
+          <div class="controls">
+            <p class="notice" style="margin:0;text-align:center">📱 각자 폰으로 QR을 찍고<br>자기 이름을 누르세요</p>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">역할은 화면을 꾹 누르는 동안만 보여요.<br>마피아는 동료 마피아도 함께 보입니다.</p>
+            <button class="btn" data-a="copy">🔗 링크 복사 (단톡방 공유)</button>
+            <button class="btn big primary" data-a="start">🌙 모두 확인했어요 → 밤 시작</button>
+            <button class="btn" data-a="back">✏️ 준비 화면으로</button>
+          </div>
+        </div>
+      </div>`;
+    actions = {
+      copy: async () => {
+        try { await navigator.clipboard.writeText(url); toast('링크를 복사했어요. 단톡방에 붙여 넣으세요'); }
+        catch (e) { prompt('아래 링크를 복사하세요', url); }
+      },
+      start: () => night(),
+      back: () => setup(),
+    };
+  }
+
+  // ── 밤 ──
+  function night() {
+    stopT(); hush(); M.phase = 'night'; persist();
+    const steps = ['intro', 'mafia']; if (M.g.d) steps.push('doctor'); if (M.g.p) steps.push('police');
+    const LINES = {
+      intro: ['🌙 밤 ' + M.day, '밤이 되었습니다. 모두 고개를 숙이고 눈을 감아 주세요.'],
+      mafia: ['🔪 마피아 차례', '마피아는 눈을 뜨고, 제거할 사람을 함께 지목해 주세요.'],
+      doctor: ['💉 의사 차례', '의사는 눈을 뜨고, 살리고 싶은 사람을 지목해 주세요.'],
+      police: ['🚓 경찰 차례', '경찰은 눈을 뜨고, 조사할 사람을 지목해 주세요.'],
+    };
+    const CLOSE = { mafia: '마피아는 눈을 감아 주세요.', doctor: '의사는 눈을 감아 주세요.', police: '경찰은 눈을 감아 주세요.' };
+    let si = 0, sel = null, kill = null, saved = null, result = null;
+
+    function draw() {
+      const st = steps[si], [title, line] = LINES[st];
+      const label = st === 'intro' ? '다음 ▶' : st === 'police' && result === null ? '🔍 조사하기' : '확정 ▶';
+      const body = st === 'intro' ? '<div class="bomb">🌙</div>'
+        : result !== null ? `<div class="answer pop">${result ? '👍 마피아입니다' : '👎 마피아가 아닙니다'}</div>`
+          : pickGrid(sel);
+      main.innerHTML = `
+        <div class="screen night">
+          <div class="head"><h2>${title}</h2><span class="sub">사회자만 화면을 보세요</span></div>
+          <div class="stage">
+            <p class="notice" style="margin:0">${esc(line)}</p>
+            ${body}
+            <div class="row">
+              ${st !== 'intro' && st !== 'mafia' && result === null ? '<button class="btn" data-a="skip">아무도 안 뜸 · 넘어가기</button>' : ''}
+              <button class="btn big primary" data-a="ok" ${st !== 'intro' && result === null && sel === null ? 'disabled' : ''}>${label}</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    const next = () => {
+      si++; sel = null; result = null;
+      if (si >= steps.length) return morning(kill, saved);
+      say(LINES[steps[si]][1]); draw();
+    };
+    actions = {
+      sel: (v) => { sel = Number(v); sfx.tick(); draw(); },
+      ok: () => {
+        const st = steps[si];
+        if (st === 'intro') return next();
+        if (st === 'police' && result === null) { result = roles()[sel] === 'mafia'; sfx.beep(); return draw(); }
+        if (st === 'mafia') kill = sel;
+        if (st === 'doctor') saved = sel;
+        say(CLOSE[st]); next();
+      },
+      skip: () => { say(CLOSE[steps[si]]); next(); },
+    };
+    say(LINES.intro[1]); draw();
+  }
+
+  // ── 아침 ──
+  function morning(kill, saved) {
+    const died = kill !== null && kill !== saved ? kill : null;
+    if (died !== null) M.alive[died] = false;
+    const msg = kill === null ? '조용한 밤이었습니다. 아무 일도 일어나지 않았습니다.'
+      : died === null ? `마피아가 ${M.g.n[kill]} 님을 노렸지만, 의사가 살려 냈습니다!`
+        : `어젯밤 ${M.g.n[died]} 님이 마피아에게 당했습니다.`;
+    M.phase = 'day'; persist();
+    say('아침이 되었습니다. 모두 눈을 떠 주세요. ' + msg);
+    died !== null ? sfx.boom() : sfx.fanfare();
+    const win = checkWin();
+    main.innerHTML = `
+      <div class="screen">
+        <div class="stage">
+          <div class="qno">☀️ 아침 ${M.day}</div>
+          <div class="answer pop">${esc(msg)}</div>
+          ${died !== null && M.reveal ? `<div class="pill">${roleTag(died)}</div>` : ''}
+          <button class="btn big ${win ? 'gold' : 'primary'}" data-a="go">${win ? '🏁 결과 보기' : '☀️ 낮 토론 시작'}</button>
+        </div>
+      </div>`;
+    actions = { go: () => (win ? end(win) : day()) };
+  }
+
+  // ── 낮 토론 ──
+  function day() {
+    stopT(); M.phase = 'day'; persist();
+    let left = M.talk || 180, edit = false;
+    const tick = (s) => { left = s; const t = $('#tm'); if (t) { t.textContent = fmt(s); t.classList.toggle('warn', s <= 10); } if (s <= 5 && s > 0) sfx.tick(); };
+    const run = () => { stopT(); stopTimer = countdown(left, tick, () => { stopTimer = null; sfx.boom(); say('토론 시간이 끝났습니다. 투표를 준비해 주세요.'); }); };
+    function draw() {
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>☀️ 낮 ${M.day} · 토론</h2><span class="pill">생존 ${aliveIdx().length}명</span></div>
+          <div class="stage-wrap">
+            <div class="stage">
+              <div class="timer" id="tm">${fmt(left)}</div>
+              <div class="ngrid">${M.g.n.map((nm, k) => `<button class="nbtn ${M.alive[k] ? '' : 'dead'}" ${edit ? `data-a="flip" data-v="${k}"` : ''}>${esc(nm)}</button>`).join('')}</div>
+              ${edit ? '<p class="notice" style="margin:0">이름을 누르면 생존/탈락이 바뀝니다</p>' : ''}
+            </div>
+            <div class="controls">
+              <div class="row"><button class="btn primary" data-a="talk">▶ 토론 시작</button><button class="btn" data-a="plus">+30초</button></div>
+              <button class="btn big gold" data-a="vote">🗳 투표하기</button>
+              <button class="btn" data-a="edit">${edit ? '✅ 수정 완료' : '✏️ 생존자 수정'}</button>
+              <button class="btn" data-a="quit">🏁 게임 끝내기</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    actions = {
+      talk: () => { say('토론을 시작합니다.'); run(); },
+      plus: () => { left += 30; tick(left); if (stopTimer) run(); },
+      vote: () => vote(),
+      edit: () => {
+        edit = !edit; persist();
+        if (!edit) { const w = checkWin(); if (w) return end(w); }
+        draw();
+      },
+      flip: (v) => { M.alive[Number(v)] = !M.alive[Number(v)]; persist(); draw(); },
+      quit: () => { if (confirm('게임을 끝내고 정체를 공개할까요?')) end(checkWin()); },
+    };
+    draw();
+  }
+
+  // ── 투표 ──
+  function vote() {
+    stopT(); hush();
+    let sel = null;
+    say('투표를 시작합니다. 셋, 둘, 하나에 맞춰 마피아라고 생각하는 사람을 동시에 가리켜 주세요. 셋. 둘. 하나. 지목!');
+    function draw() {
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>🗳 투표</h2><span class="sub">가장 많이 지목된 사람을 누르세요</span></div>
+          <div class="stage-wrap">
+            <div class="stage">
+              <div class="timer" id="tm"></div>
+              ${pickGrid(sel)}
+            </div>
+            <div class="controls">
+              <button class="btn" data-a="defense" ${sel === null ? 'disabled' : ''}>⚖️ 최후의 변론 30초</button>
+              <button class="btn big bad" data-a="exec" ${sel === null ? 'disabled' : ''}>☠️ 처형</button>
+              <button class="btn" data-a="none">🤝 동점·부결 (처형 없음)</button>
+              <button class="btn" data-a="back">↩ 토론으로</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    actions = {
+      sel: (v) => { sel = Number(v); sfx.tick(); draw(); },
+      defense: () => {
+        say(`${M.g.n[sel]} 님, 최후의 변론을 해 주세요.`);
+        stopT(); stopTimer = countdown(30, (s) => { const t = $('#tm'); if (t) { t.textContent = fmt(s); t.classList.toggle('warn', s <= 5); } }, () => { stopTimer = null; sfx.boom(); });
+      },
+      exec: () => execute(sel),
+      none: () => { say('이번 투표에서는 아무도 처형되지 않았습니다.'); M.day++; persist(); night(); },
+      back: () => day(),
+    };
+    draw();
+  }
+
+  function execute(k) {
+    stopT(); hush();
+    M.alive[k] = false; persist();
+    const msg = `${M.g.n[k]} 님이 처형되었습니다.`;
+    say(msg + (M.reveal ? ` ${M.g.n[k]} 님은 ${ROLES[roles()[k]].n}였습니다.` : ''));
+    sfx.boom(); flash('var(--bad)');
+    const win = checkWin();
+    main.innerHTML = `
+      <div class="screen">
+        <div class="stage">
+          <div class="answer pop">☠️ ${esc(msg)}</div>
+          ${M.reveal ? `<div class="pill">${roleTag(k)}</div>` : ''}
+          <button class="btn big ${win ? 'gold' : 'primary'}" data-a="go">${win ? '🏁 결과 보기' : '🌙 밤으로'}</button>
+        </div>
+      </div>`;
+    actions = { go: () => { if (win) return end(win); M.day++; persist(); night(); } };
+  }
+
+  // ── 결과 ──
+  function end(win) {
+    stopT(); hush();
+    M.over = win || 'none'; M.phase = 'over'; persist();
+    const r = roles();
+    const title = win === 'mafia' ? '🔪 마피아 승리!' : win === 'citizen' ? '🎉 시민 승리!' : '🏁 게임 종료';
+    say(win === 'mafia' ? '마피아가 승리했습니다!' : win === 'citizen' ? '마피아를 모두 찾아냈습니다. 시민 팀의 승리입니다!' : '게임을 종료합니다.');
+    sfx.fanfare(); flash(win === 'mafia' ? 'var(--bad)' : 'var(--gold)');
+    main.innerHTML = `
+      <div class="screen">
+        <div class="stage" style="overflow:auto">
+          <div class="result-big pop">${title}</div>
+          <div class="ngrid">${M.g.n.map((nm, k) => `<div class="nbtn ${M.alive[k] ? '' : 'dead'} ${r[k] === 'mafia' ? 'mafia' : ''}">${esc(nm)}<small>${ROLES[r[k]].ic} ${ROLES[r[k]].n}</small></div>`).join('')}</div>
+          <div class="row">
+            <button class="btn big primary" data-a="again">🔁 같은 명단으로 새 게임</button>
+            <button class="btn" data-a="setup">✏️ 명단·설정 바꾸기</button>
+          </div>
+        </div>
+      </div>`;
+    actions = {
+      again: () => { M = { ...M, g: { ...M.g, c: newCode() }, alive: M.g.n.map(() => true), day: 1, over: null }; persist(); join(); },
+      setup: () => setup(),
+    };
+  }
+
+  setup();
 };
 
 // ── ⚙️ 설정 ──
