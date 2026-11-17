@@ -77,8 +77,10 @@ $('#scorebar').addEventListener('click', (e) => {
 let actions = {};
 let cleanups = [];
 function onCleanup(fn) { cleanups.push(fn); }
+let current = null;
 function go(name, ...args) {
   cleanups.forEach((fn) => fn()); cleanups = [];
+  current = name;
   actions = {};
   stopClip();
   main.scrollTop = 0;
@@ -204,6 +206,7 @@ screens.home = () => {
       </div>
       <div class="tools">
         <button class="btn ${ytUnlocked ? 'ok' : 'gold'}" data-a="sound">${ytUnlocked ? '✅ 사운드 준비됨' : '🔊 사운드 준비 (먼저!)'}</button>
+        ${NET.info ? '<button class="btn primary" data-a="phones">📱 폰 연결</button>' : ''}
         <button class="btn" data-a="fs">⛶ 전체화면</button>
         <button class="btn" data-a="settings">⚙️ 설정</button>
       </div>
@@ -211,6 +214,7 @@ screens.home = () => {
   actions = {
     open: (k) => go(k),
     sound: () => go('sound'),
+    phones: () => go('phones'),
     settings: () => go('settings'),
     fs: () => {
       const d = document.documentElement;
@@ -307,16 +311,17 @@ screens.music = (kind = 'music') => {
   const setProg = (p) => { const el = $('#prog'); if (el) el.style.width = (p * 100) + '%'; };
   onYtPlaying = (on) => { playing = on; const d = $('#disc'); if (d) d.classList.toggle('spin', on); };
   onCleanup(() => { onYtPlaying = null; });
-  const move = (d) => { stopClip(); i = (i + d + list.length) % list.length; hint = 0; revealed = false; render(); cueSong(song()); };
+  const move = (d) => { stopClip(); i = (i + d + list.length) % list.length; hint = 0; revealed = false; render(); cueSong(song()); Party.buzzReset(); };
+  Party.buzzer(() => stopClip()); // 폰 버저: 누가 누르면 노래를 멈춤
 
   actions = {
-    filter: (f) => { stopClip(); filter = f; list = Q.list(f); order = orderFor(f); i = 0; hint = 0; revealed = false; render(); cueSong(song()); },
+    filter: (f) => { stopClip(); filter = f; list = Q.list(f); order = orderFor(f); i = 0; hint = 0; revealed = false; render(); cueSong(song()); Party.buzzReset(); },
     clip: (v) => { setProg(0); playClip(song(), Number(v), setProg); },
     full: () => { setProg(1); playClip(song(), 0); },
     stop: () => stopClip(),
     hint: () => { if (hint < Q.hints.length) { hint++; sfx.beep(); render(); } },
     reveal: () => { revealed = true; sfx.fanfare(); render(); },
-    win: (t) => { addScore(Number(t), 1); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; render(); playClip(song(), 0); },
+    win: (t) => { addScore(Number(t), 1); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; render(); playClip(song(), 0); Party.banner(null); },
     prev: () => move(-1),
     next: () => move(1),
   };
@@ -472,16 +477,17 @@ screens.chosung = () => {
   const show = () => { stopT(); revealed = true; render(); };
 
   actions = {
-    cat: (c) => { stopT(); cat = c; build(); render(); },
+    cat: (c) => { stopT(); cat = c; build(); render(); Party.buzzReset(); },
     timer: () => {
       stopT();
       stopTimer = countdown(10, (s) => { const t = $('#tm'); if (t) { t.textContent = s; t.classList.toggle('warn', s <= 3); } if (s <= 3 && s > 0) sfx.tick(); }, () => { stopTimer = null; sfx.boom(); const t = $('#tm'); if (t) t.textContent = '⏰'; });
     },
     more: () => { keep++; sfx.beep(); render(); },
     reveal: () => { sfx.fanfare(); show(); },
-    win: (t) => { addScore(Number(t), pts()); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); show(); },
-    next: () => { stopT(); i = (i + 1) % pool.length; keep = 0; revealed = false; render(); },
+    win: (t) => { addScore(Number(t), pts()); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); show(); Party.banner(null); },
+    next: () => { stopT(); i = (i + 1) % pool.length; keep = 0; revealed = false; render(); Party.buzzReset(); },
   };
+  Party.buzzer(() => stopT()); // 폰 버저: 누가 누르면 10초 타이머를 멈춤
   build(); render();
 };
 
@@ -521,9 +527,10 @@ screens.photo = () => {
   actions = {
     zoom: () => { if (stage < 3) { stage++; sfx.beep(); render(); } },
     reveal: () => { revealed = true; sfx.fanfare(); render(); },
-    win: (t) => { addScore(Number(t), POINTS[stage]); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; render(); },
-    next: () => { i = (i + 1) % order.length; stage = 0; revealed = false; render(); preload(i + 1); },
+    win: (t) => { addScore(Number(t), POINTS[stage]); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; render(); Party.banner(null); },
+    next: () => { i = (i + 1) % order.length; stage = 0; revealed = false; render(); preload(i + 1); Party.buzzReset(); },
   };
+  Party.buzzer();
   render(); preload(1);
 };
 
@@ -629,7 +636,7 @@ screens.charades = () => {
 
 // ── 🎨 캐치마인드 ──
 screens.draw = () => {
-  let team = 0, secs = 90, relay = true, word = null;
+  let team = 0, secs = 90, relay = true, word = null, phone = Party.active;
   const usedDraw = screens.draw.used || (screens.draw.used = new Set());
 
   function setup() {
@@ -645,18 +652,105 @@ screens.draw = () => {
             ${[60, 90, 120].map((s) => `<button class="chip ${s === secs ? 'on' : ''}" data-a="secs" data-v="${s}">${s}초</button>`).join('')}
             <button class="chip ${relay ? 'on' : ''}" data-a="relay">🔁 릴레이 (10초마다 다음 사람)</button>
           </div>
-          <p class="sub" style="margin:0;color:var(--muted)">그리는 팀 전원이 폰을 돌려가며 이어 그리고, 상대 팀이 맞힙니다.<br>상대 팀이 맞히면 상대 팀 +2점, 그리는 팀 +1점</p>
-          <button class="btn big primary" data-a="word">제시어 보기</button>
+          ${Party.active ? `<div class="chips"><button class="chip ${phone ? 'on' : ''}" data-a="phone">📱 각자 폰으로 그리기</button><button class="chip ${phone ? '' : 'on'}" data-a="hand">✋ 진행 화면에 그리기</button></div>` : ''}
+          <p class="sub" style="margin:0;color:var(--muted)">${phone
+            ? '제시어는 그리는 팀 폰에만 나옵니다. 차례인 사람이 자기 폰에 그리면 TV에 실시간으로 보여요.'
+            : '그리는 팀 전원이 폰을 돌려가며 이어 그리고, 상대 팀이 맞힙니다.'}<br>상대 팀이 맞히면 상대 팀 +2점, 그리는 팀 +1점</p>
+          ${phone && !Party.members(team).length ? `<p class="notice" style="margin:0">⚠ ${esc(S.teams[team].name)}에 연결된 폰이 없어요</p>` : ''}
+          <button class="btn big primary" data-a="word">${phone ? '🎨 시작 (제시어는 폰으로)' : '제시어 보기'}</button>
         </div>
       </div>`;
     actions = {
       team: (v) => { team = Number(v); setup(); }, secs: (v) => { secs = Number(v); setup(); },
-      relay: () => { relay = !relay; setup(); }, word: () => showWord(),
+      relay: () => { relay = !relay; setup(); }, word: () => (phone ? phoneDraw() : showWord()),
+      phone: () => { phone = true; setup(); }, hand: () => { phone = false; setup(); },
+    };
+  }
+  const newWord = () => {
+    let pool = DRAW_WORDS.filter((w) => !usedDraw.has(w)); if (!pool.length) { usedDraw.clear(); pool = DRAW_WORDS; }
+    word = pick(pool); usedDraw.add(word);
+  };
+
+  // 📱 폰으로 그리기: 차례인 사람 폰의 선이 서버를 거쳐 이 캔버스에 그려짐
+  function phoneDraw() {
+    newWord();
+    Party.act('draw', { team, word });
+    onCleanup(() => Party.act('idle'));
+    main.innerHTML = `
+      <div class="screen">
+        <div class="stage-wrap">
+          <div class="stage" style="padding:6px">
+            <div class="canvas-box" id="cbox" style="background:#222"><canvas id="cv"></canvas><div class="ov" style="color:#fff"><span id="who"></span><span class="timer" id="tm" style="font-size:28px">${secs}</span></div></div>
+          </div>
+          <div class="controls">
+            <p class="notice" style="margin:0;text-align:center">✏️ ${esc(S.teams[team].name)}가 폰으로 그리는 중<br>${esc(S.teams[1 - team].name)}는 TV를 보고 맞혀 보세요!</p>
+            <div class="row"><button class="btn" data-a="next">✏️ 다음 사람</button><button class="btn" data-a="clear">🧽 지우기</button></div>
+            <div class="row"><button class="btn" data-a="another">🔀 다른 단어</button></div>
+            <div class="row"><button class="btn ok big" data-a="got">⭕ 맞혔다!</button></div>
+            <div class="row"><button class="btn" data-a="giveup">🏳 포기 · 정답 공개</button></div>
+          </div>
+        </div>
+      </div>`;
+    const cv = $('#cv'), box = $('#cbox'), ctx = cv.getContext('2d');
+    let strokes = [], last = {}, R = null;
+    // 폰과 같은 4:3 영역에 맞춰 그림 (가운데 정렬)
+    function area() {
+      const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      cv.width = r.width * dpr; cv.height = r.height * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const w = Math.min(r.width, r.height * 4 / 3), h = w * 3 / 4;
+      R = { x: (r.width - w) / 2, y: (r.height - h) / 2, w, h };
+      ctx.fillStyle = '#222'; ctx.fillRect(0, 0, r.width, r.height);
+      ctx.fillStyle = '#fff'; ctx.fillRect(R.x, R.y, R.w, R.h);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      last = {}; strokes.forEach(paint);
+    }
+    function paint(ch) {
+      const P = (p) => [R.x + p[0] * R.w, R.y + p[1] * R.h];
+      ctx.strokeStyle = ch.c; ctx.lineWidth = ch.w * R.w / 400;
+      ctx.beginPath();
+      let [x, y] = ch.first || !last[ch.id] ? P(ch.p[0]) : last[ch.id];
+      ctx.moveTo(x, y); if (ch.first) ctx.lineTo(x + 0.1, y + 0.1);
+      ch.p.forEach((p) => { [x, y] = P(p); ctx.lineTo(x, y); });
+      ctx.stroke(); last[ch.id] = [x, y];
+    }
+    area(); window.addEventListener('resize', area); onCleanup(() => window.removeEventListener('resize', area));
+    let turn = 0, running = true;
+    const who = (a) => { const w = $('#who'); if (w && a && a.kind === 'draw') w.textContent = a.drawerName ? `✏️ ${a.drawerName}${relay ? ` (${a.turn + 1}번 주자)` : ''}` : '⚠ 그릴 사람의 폰이 없어요'; };
+    who(Party.st && Party.st.act);
+    onCleanup(Party.on((v) => {
+      if (v.t === 'stroke') { strokes.push(v.s); paint(v.s); }
+      else if (v.t === 'strokes') { strokes = v.all.slice(); area(); }
+      else if (v.t === 'host') who(v.act);
+    }));
+    const stop = countdown(secs, (s) => {
+      const t = $('#tm'); if (t) { t.textContent = s; t.classList.toggle('warn', s <= 10); }
+      const elapsed = secs - s;
+      if (relay && elapsed > 0 && elapsed % 10 === 0 && s > 0) { turn++; sfx.go(); flash('var(--gold)'); Party.act('drawTurn'); toast('🔁 다음 사람 차례!', 1500); }
+      else if (s <= 5 && s > 0) sfx.tick();
+    }, () => end(false));
+    function end(got) {
+      if (!running) return; running = false; stop(); Party.act('drawEnd');
+      got ? sfx.fanfare() : sfx.boom();
+      const other = 1 - team;
+      main.querySelector('.controls').innerHTML = `
+        <div class="answer pop" style="text-align:center">${esc(word)}</div>
+        ${got ? `<div class="row"><button class="btn ${other === 0 ? 'A' : 'B'}" data-a="pts">${esc(S.teams[other].name)} +2 · ${esc(S.teams[team].name)} +1 반영</button></div>` : '<p class="notice" style="text-align:center;margin:0">아무도 못 맞혔어요!</p>'}
+        <div class="row"><button class="btn big primary" data-a="again">다음 라운드</button></div>`;
+      actions = {
+        pts: (v, el) => { addScore(other, 2); addScore(team, 1); el.disabled = true; el.textContent = '✅ 반영 완료'; },
+        again: () => { team = 1 - team; Party.act('idle'); setup(); },
+      };
+    }
+    actions = {
+      next: () => { turn++; sfx.go(); Party.act('drawTurn'); },
+      clear: () => Party.act('drawClear'),
+      another: () => { newWord(); Party.act('draw', { team, word }); toast('🔀 폰에 새 제시어를 보냈어요'); },
+      got: () => end(true),
+      giveup: () => end(false),
     };
   }
   function showWord() {
-    let pool = DRAW_WORDS.filter((w) => !usedDraw.has(w)); if (!pool.length) { usedDraw.clear(); pool = DRAW_WORDS; }
-    word = pick(pool); usedDraw.add(word);
+    newWord();
     main.innerHTML = `
       <div class="screen">
         <div class="stage">
@@ -733,28 +827,45 @@ screens.draw = () => {
 };
 
 // ── 💣 폭탄 돌리기 ──
+// 폰 연결(📱)이 있으면 폭탄이 폰에서 폰으로 넘어갑니다 (노트북을 TV에 연결해서 진행 기기를 돌릴 수 없을 때).
 screens.bomb = () => {
-  let cat = pick(BOMB_CATEGORIES);
+  let cat = pick(BOMB_CATEGORIES), phone = Party.active;
+  const newCat = () => { cat = pick(BOMB_CATEGORIES.filter((c) => c !== cat)); if (phone) Party.act('bombCat', { cat }); };
+  if (phone) Party.act('bomb', { cat });
+  onCleanup(() => { if (Party.st) Party.act('idle'); });
   function idle() {
     main.innerHTML = `
       <div class="screen">
-        <div class="head"><h2>💣 폭탄 돌리기</h2><span class="sub">한 명씩 답하고 폰을 옆으로!</span></div>
+        <div class="head"><h2>💣 폭탄 돌리기</h2><span class="sub">${phone ? '폰으로 답하고 넘기기!' : '한 명씩 답하고 폰을 옆으로!'}</span></div>
         <div class="stage">
           <div class="bomb">💣</div>
           <div class="category pop">${esc(cat)}</div>
-          <p class="sub" style="margin:0;color:var(--muted)">주제에 맞는 단어를 말하고 옆 사람에게 폰을 넘기세요. 언제 터질지는 아무도 몰라요!</p>
+          <p class="sub" style="margin:0;color:var(--muted)">${phone
+            ? '폭탄이 온 사람은 주제에 맞는 단어를 외치고, 자기 폰에서 넘길 사람을 누르세요. 언제 터질지는 아무도 몰라요!'
+            : '주제에 맞는 단어를 말하고 옆 사람에게 폰을 넘기세요. 언제 터질지는 아무도 몰라요!'}</p>
+          ${Party.active ? `<div class="chips"><button class="chip ${phone ? 'on' : ''}" data-a="phone">📱 폰으로 돌리기 (${Party.members().length}명)</button><button class="chip ${phone ? '' : 'on'}" data-a="hand">✋ 진행 폰을 직접 돌리기</button></div>` : ''}
           <div class="row"><button class="btn" data-a="shuffle">🔀 주제 바꾸기</button><button class="btn big bad" data-a="start">💣 점화!</button></div>
         </div>
       </div>`;
-    actions = { shuffle: () => { cat = pick(BOMB_CATEGORIES.filter((c) => c !== cat)); idle(); }, start: () => run() };
+    actions = {
+      shuffle: () => { newCat(); idle(); },
+      start: () => run(),
+      phone: () => { phone = true; Party.act('bomb', { cat }); idle(); },
+      hand: () => { phone = false; Party.act('idle'); idle(); },
+    };
   }
-  function run() {
+  async function run() {
+    if (phone) {
+      const r = await Party.act('bombStart');
+      if (!r) { toast('폰 연결이 끊겼어요. 진행 폰을 직접 돌려 주세요'); phone = false; }
+    }
     const fuse = 20 + Math.random() * 30, t0 = Date.now();
     main.innerHTML = `
       <div class="screen">
         <div class="stage">
           <div class="bomb shake">💣</div>
           <div class="category" id="cat">${esc(cat)}</div>
+          ${phone ? '<div class="result-big" id="holder" style="text-align:center"></div>' : ''}
           <button class="btn" data-a="shuffle">🔀 주제 바꾸기</button>
         </div>
       </div>`;
@@ -768,18 +879,26 @@ screens.bomb = () => {
     };
     loop();
     onCleanup(() => clearTimeout(timer));
-    actions = { shuffle: () => { cat = pick(BOMB_CATEGORIES.filter((c) => c !== cat)); $('#cat').textContent = cat; sfx.beep(); } };
+    // 지금 폭탄을 든 사람을 TV에 표시
+    const show = (a) => { const h = $('#holder'); if (h && a && a.kind === 'bomb' && a.holderName) h.innerHTML = `👉 ${esc(a.holderName)} <small style="color:var(--muted)">(${a.passes || 0}번째)</small>`; };
+    if (phone) { show(Party.st && Party.st.act); onCleanup(Party.on((v) => { if (v.t === 'host') show(v.act); })); }
+    actions = { shuffle: () => { newCat(); $('#cat').textContent = cat; sfx.beep(); } };
   }
-  function explode() {
+  async function explode() {
+    let who = null;
+    if (phone) {
+      const r = await Party.act('bombBoom');
+      if (r && r.act && r.act.boomName) who = { name: r.act.boomName, team: r.act.boomTeam };
+    }
     sfx.boom(); flash('#ff6b00'); if (navigator.vibrate) navigator.vibrate([400, 100, 400]);
     main.innerHTML = `
       <div class="screen">
         <div class="stage">
           <div class="boom pop">💥 펑!</div>
-          <p class="notice" style="margin:0">지금 폰을 들고 있는 사람 당첨!</p>
+          <p class="notice" style="margin:0">${who ? `<b style="font-size:1.4em">${esc(who.name)}</b> 님 당첨! (${esc(S.teams[who.team].name)})` : '지금 폰을 들고 있는 사람 당첨!'}</p>
           <div class="row">
-            <button class="btn A" data-a="minus" data-v="0">${esc(S.teams[0].name)} −1</button>
-            <button class="btn B" data-a="minus" data-v="1">${esc(S.teams[1].name)} −1</button>
+            <button class="btn A ${who && who.team === 0 ? 'on' : ''}" data-a="minus" data-v="0">${esc(S.teams[0].name)} −1</button>
+            <button class="btn B ${who && who.team === 1 ? 'on' : ''}" data-a="minus" data-v="1">${esc(S.teams[1].name)} −1</button>
           </div>
           <div class="row"><button class="btn gold big" data-a="roulette">🎰 벌칙 룰렛</button><button class="btn big" data-a="again">🔁 한 판 더</button></div>
         </div>
@@ -787,7 +906,7 @@ screens.bomb = () => {
     actions = {
       minus: (v, el) => { addScore(Number(v), -1); sfx.bad(); el.disabled = true; },
       roulette: () => go('roulette'),
-      again: () => { cat = pick(BOMB_CATEGORIES.filter((c) => c !== cat)); idle(); },
+      again: () => { newCat(); if (phone) Party.act('bomb', { cat }); idle(); },
     };
   }
   idle();
@@ -831,24 +950,31 @@ screens.allin = () => {
     };
   }
   function question() {
-    const q = ALLIN[order[qi % order.length]];
+    const q = ALLIN[order[qi % order.length]], phone = Party.active;
+    if (phone) { Party.act('allin'); onCleanup(() => Party.act('idle')); }
+    // 팀 폰 답 제출 현황 (답 내용은 정답 공개 때까지 TV에 안 나옴)
+    const status = (a) => [0, 1].map((t) => `<span class="pill" style="border-color:var(--${t ? 'B' : 'A'})">${esc(S.teams[t].name)} ${a && a.kind === 'allin' && a.answers[t] ? '✅ 제출' : '⏳ 작성 중'}</span>`).join('');
     main.innerHTML = `
       <div class="screen">
         <div class="head"><h2>🔥 문제</h2><span class="pill">${esc(S.teams[0].name)} ${bets[0]} vs ${bets[1]} ${esc(S.teams[1].name)}</span></div>
         <div class="stage">
           <div class="question pop">${esc(q.q)}</div>
-          <p class="notice" style="margin:0">각 팀은 답을 종이에 적으세요! ✍️</p>
+          <p class="notice" style="margin:0">${phone ? '각 팀은 폰으로 답을 제출하세요! 📱 (팀원 누구나, 마지막 제출이 팀 답)' : '각 팀은 답을 종이에 적으세요! ✍️'}</p>
+          ${phone ? `<div class="row" id="sub">${status(Party.st && Party.st.act)}</div>` : ''}
           <div class="timer" id="tm"></div>
           <div class="row"><button class="btn" data-a="timer">⏱ 30초</button><button class="btn big gold" data-a="answer">정답 공개</button></div>
         </div>
       </div>`;
     actions = {
       timer: () => countdown(30, (s) => { const t = $('#tm'); if (t) { t.textContent = s; t.classList.toggle('warn', s <= 5); } if (s <= 5 && s > 0) sfx.tick(); }, () => { sfx.boom(); }),
-      answer: () => judge(q),
+      answer: () => judge(q, phone),
     };
+    if (phone) onCleanup(Party.on((v) => { const el = $('#sub'); if (v.t === 'host' && el) el.innerHTML = status(v.act); }));
   }
-  function judge(q) {
+  async function judge(q, phone) {
     result = [null, null];
+    let ans = null;
+    if (phone) { const r = await Party.act('allinClose'); ans = r && r.act && r.act.answers; }
     const draw = () => {
       main.innerHTML = `
         <div class="screen">
@@ -859,6 +985,7 @@ screens.allin = () => {
               ${[0, 1].map((t) => `
                 <div class="bet ${t ? 'B' : 'A'}">
                   <b>${esc(S.teams[t].name)} · 베팅 ${bets[t]}</b>
+                  ${ans ? `<div class="answer" style="font-size:clamp(18px,4vmin,34px)">${ans[t] ? `“${esc(ans[t].text)}”<small>${esc(ans[t].by)}</small>` : '<small>답 없음</small>'}</div>` : ''}
                   <div class="row">
                     <button class="btn ${result[t] === true ? 'ok' : ''}" data-a="mark" data-v="${t}:1">⭕</button>
                     <button class="btn ${result[t] === false ? 'bad' : ''}" data-a="mark" data-v="${t}:0">❌</button>
@@ -970,9 +1097,39 @@ screens.mafia = () => {
   onCleanup(hush);
 
   let M = S.mafia || null, stopTimer = null;
-  const persist = () => { S.mafia = M; save(); };
+  const persist = () => { S.mafia = M; save(); if (M && M.mode === 'server' && M.ht) sync(); };
   const stopT = () => { if (stopTimer) { stopTimer(); stopTimer = null; } };
   onCleanup(stopT);
+
+  // ── 노트북 서버 모드 (node server.js 로 열었을 때만 사용 가능) ──
+  // 서버가 역할·밤 선택을 들고, 각 폰에는 자기 몫만 실시간으로 보냅니다.
+  let SRV = null, es = null;
+  const srvReady = location.protocol.startsWith('http')
+    ? fetch('/api/ping', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => (SRV = j && j.ok ? j : null)).catch(() => null)
+    : Promise.resolve(null);
+  const post = (route, body) => fetch('/api/m/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(j))));
+  const hostPost = (route, body = {}) => post(route, { c: M.g.c, ht: M.ht, ...body });
+  function sync() {
+    return hostPost('sync', { phase: M.phase, alive: M.alive, day: M.day, over: M.over, reveal: M.reveal })
+      .catch((e) => (e && e.error === 'nogame' ? register().catch(() => null) : null)); // 서버를 다시 켰으면 재등록
+  }
+  // 서버에 게임 등록 (이미 있으면 그대로) + 현재 상태 맞추기. 서버를 껐다 켜도 이어서 할 수 있음
+  async function register() {
+    const j = await post('new', { g: M.g, ht: M.ht });
+    M.ht = j.ht; S.mafia = M; save();
+    await sync();
+  }
+  const closeES = () => { if (es) { es.close(); es = null; } };
+  onCleanup(closeES);
+  function listen(fn) {
+    closeES();
+    const me = es = new EventSource(`/api/m/events?c=${M.g.c}&ht=${M.ht}`);
+    me.onmessage = (e) => { try { fn(JSON.parse(e.data)); } catch (err) { /* 무시 */ } };
+    // 서버를 다시 켰으면 게임을 다시 등록하고 연결
+    me.onerror = () => { if (me.readyState === 2 && es === me) setTimeout(() => { if (es === me) register().then(() => listen(fn)).catch(() => listen(fn)); }, 2000); };
+  }
+
   const roles = () => mafiaRoles(M.g);
   const aliveIdx = () => M.g.n.map((_, k) => k).filter((k) => M.alive[k]);
   const pickGrid = (sel) => `<div class="ngrid">${aliveIdx().map((k) => `<button class="nbtn ${sel === k ? 'on' : ''}" data-a="sel" data-v="${k}">${esc(M.g.n[k])}</button>`).join('')}</div>`;
@@ -988,6 +1145,8 @@ screens.mafia = () => {
     stopT();
     let txt = ((M && M.g.n) || S.players || []).join('\n');
     let m = M ? M.g.m : 0, p = M ? M.g.p : 1, d = M ? M.g.d : 1, reveal = M ? !!M.reveal : false;
+    // 역할 확인 방식: 'each' = 한 명씩 개인 QR(다른 사람 역할을 볼 수 없음), 'all' = 전체 QR + 이름 고르기(빠름)
+    let mode = (M && M.mode) || S.mafiaMode || (SRV ? 'server' : 'each');
     const autoM = (n) => (n <= 6 ? 1 : n <= 11 ? 2 : 3);
     const summary = () => {
       const n = parseNames(txt).length, mm = m || autoM(n);
@@ -1006,6 +1165,9 @@ screens.mafia = () => {
               <div class="row"><button class="btn" data-a="m" data-v="-1">마피아 −</button><button class="btn" data-a="m" data-v="1">마피아 ＋</button></div>
               <div class="row"><button class="btn ${p ? 'on' : ''}" data-a="p">🚓 경찰 ${p ? 'ON' : 'OFF'}</button><button class="btn ${d ? 'on' : ''}" data-a="d">💉 의사 ${d ? 'ON' : 'OFF'}</button></div>
               <div class="row"><button class="btn ${reveal ? 'on' : ''}" data-a="reveal">탈락 시 직업 공개 ${reveal ? 'ON' : 'OFF'}</button><button class="btn ${S.tts ? 'on' : ''}" data-a="tts">🔊 음성 ${S.tts ? 'ON' : 'OFF'}</button></div>
+              ${SRV ? `<button class="btn ${mode === 'server' ? 'on' : ''}" data-a="mode" data-v="server">📡 노트북 서버 (밤에도 폰으로 선택)</button>` : ''}
+              <div class="row"><button class="btn ${mode === 'each' ? 'on' : ''}" data-a="mode" data-v="each">🔒 한 명씩 개인 QR</button><button class="btn ${mode === 'all' ? 'on' : ''}" data-a="mode" data-v="all">⚡ 전체 QR (빠름)</button></div>
+              <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${mode === 'server' ? 'QR 하나로 접속, 이름은 먼저 고른 사람만. 밤에는 각자 폰으로 대상을 고릅니다.' : mode === 'each' ? '다른 사람 역할은 볼 수 없어요. 한 명씩 눈을 뜨고 찍습니다.' : '한 번에 찍고 이름을 고릅니다. 다른 사람 이름을 누르면 역할이 보여요.'}</p>
               ${M && !M.over ? '<button class="btn gold" data-a="resume">▶ 진행 중이던 게임 이어서</button>' : ''}
               <button class="btn big primary" data-a="create">🎲 역할 배정하기</button>
             </div>
@@ -1018,6 +1180,7 @@ screens.mafia = () => {
       p: () => { p = p ? 0 : 1; draw(); },
       d: () => { d = d ? 0 : 1; draw(); },
       reveal: () => { reveal = !reveal; draw(); },
+      mode: (v) => { mode = v; S.mafiaMode = v; save(); draw(); },
       tts: () => { S.tts = !S.tts; save(); draw(); if (S.tts) say('음성 안내를 켰습니다.'); },
       resume: () => (M.phase === 'night' ? night() : M.phase === 'day' ? day() : join()),
       create: () => {
@@ -1025,19 +1188,37 @@ screens.mafia = () => {
         if (n < 4) { toast('4명 이상 입력해 주세요'); return; }
         if (mm >= n - mm) { toast('마피아가 너무 많아요'); return; }
         if (n - mm - p - d < 0) { toast('인원보다 역할이 많아요'); return; }
-        M = { g: { c: newCode(), n: names, m: mm, p, d }, alive: names.map(() => true), day: 1, reveal, over: null, phase: 'join' };
+        if (mode === 'server' && !SRV) { toast('서버에 연결되지 않았어요. node server.js 로 열어 주세요'); return; }
+        M = { g: { c: newCode(), n: names, m: mm, p, d }, alive: names.map(() => true), day: 1, reveal, mode, ji: 0, over: null, phase: 'join', ht: M && M.ht };
         S.players = names; persist(); sfx.ok(); join();
       },
     };
+    const mine = actions;
     draw();
+    // 서버 확인이 늦게 끝나면 [📡 노트북 서버] 버튼을 붙여 다시 그림
+    if (!SRV) srvReady.then(() => {
+      if (!SRV || actions !== mine) return;
+      if (!(M && M.mode) && !S.mafiaMode) mode = 'server';
+      draw();
+    });
   }
 
   // ── 역할 확인 (QR) ──
+  const qrSvg = (url) => {
+    try { const q = qrcode(0, 'M'); q.addData(url); q.make(); return q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); } catch (e) { return ''; }
+  };
+  const copyText = async (url, msg) => {
+    try { await navigator.clipboard.writeText(url); toast(msg); }
+    catch (e) { prompt('아래 링크를 복사하세요', url); }
+  };
+  const personalUrl = (k) => new URL('player.html?p=' + encodeGame(personalGame(M.g, k)), location.href).href;
+
   function join() {
+    if (M.mode === 'server') { joinServer(false); return; }
+    if (M.mode !== 'all') { joinEach(); return; }
     stopT(); M.phase = 'join'; persist();
     const url = new URL('player.html?g=' + encodeGame(M.g), location.href).href;
-    let qr = '';
-    try { const q = qrcode(0, 'M'); q.addData(url); q.make(); qr = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); } catch (e) { qr = ''; }
+    const qr = qrSvg(url);
     main.innerHTML = `
       <div class="screen">
         <div class="head"><h2>🕵️ 역할 확인</h2><span class="pill">게임 코드 ${M.g.c}</span></div>
@@ -1053,17 +1234,189 @@ screens.mafia = () => {
         </div>
       </div>`;
     actions = {
-      copy: async () => {
-        try { await navigator.clipboard.writeText(url); toast('링크를 복사했어요. 단톡방에 붙여 넣으세요'); }
-        catch (e) { prompt('아래 링크를 복사하세요', url); }
-      },
+      copy: () => copyText(url, '링크를 복사했어요. 단톡방에 붙여 넣으세요'),
       start: () => night(),
       back: () => setup(),
     };
   }
 
+  // 한 명씩 개인 QR: 나머지는 눈을 감고, 차례인 사람만 자기 QR을 찍습니다.
+  // 개인 링크에는 그 사람의 역할만 들어 있어 다른 사람 역할은 알 수 없습니다.
+  function joinEach() {
+    // 음성은 끊지 않음: 앞사람 "눈을 감으세요" 뒤에 다음 사람 안내가 이어서 나오도록
+    stopT(); M.phase = 'join'; persist();
+    const n = M.g.n.length, i = Math.max(0, Math.min(n, M.ji || 0));
+    const go = (v) => { hush(); M.ji = v; persist(); joinEach(); };
+    const chips = M.g.n.map((nm, k) => `<button class="nbtn" data-a="copyk" data-v="${k}">🔗 ${esc(nm)}</button>`).join('');
+
+    if (i >= n) {
+      say('모두 눈을 뜨세요.');
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>🔒 역할 확인 완료</h2><span class="pill">게임 코드 ${M.g.c}</span></div>
+          <p class="notice" style="margin:0;text-align:center">👀 모두 눈을 뜨세요<br>${n}명 모두 QR을 찍었나요?</p>
+          <p class="sub" style="margin:0;text-align:center;color:var(--muted)">QR을 못 찍은 사람은 이름을 눌러 개인 링크를 복사한 뒤<br><b>그 사람에게만 1:1 톡</b>으로 보내 주세요. (단톡방 ❌)</p>
+          <div class="ngrid">${chips}</div>
+          <button class="btn big primary" data-a="start">🌙 밤 시작</button>
+          <div class="row"><button class="btn" data-a="redo">🔁 처음 사람부터 다시</button><button class="btn" data-a="back">✏️ 준비 화면으로</button></div>
+        </div>`;
+    } else {
+      const nm = M.g.n[i], qr = qrSvg(personalUrl(i));
+      say((i === 0 ? '모두 눈을 감으세요. ' : '') + `${nm} 님만 눈을 뜨고, QR을 찍으세요.`);
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>🔒 역할 확인 ${i + 1} / ${n}</h2><span class="pill">게임 코드 ${M.g.c}</span></div>
+          <div class="stage-wrap">
+            <div class="stage">${qr ? `<div class="qr">${qr}</div>` : '<div class="sub">QR을 만들 수 없어요. 아래 [개인 링크 복사]를 써 주세요.</div>'}</div>
+            <div class="controls">
+              <div class="result-big" style="text-align:center">📱 ${esc(nm)} 님 차례</div>
+              <p class="notice" style="margin:0;text-align:center">😌 다른 사람은 눈을 감아 주세요</p>
+              <p class="sub" style="margin:0;text-align:center;color:var(--muted)">QR을 찍으면 바로 내 역할이 나와요.<br>꾹 누르는 동안만 보입니다.</p>
+              <button class="btn big primary" data-a="next">${i + 1 < n ? '✅ 찍었어요 → 다음 사람' : '✅ 찍었어요 → 확인 끝'}</button>
+              <div class="row"><button class="btn" data-a="prev" ${i === 0 ? 'disabled' : ''}>◀ 이전 사람</button><button class="btn" data-a="again">🔊 다시 안내</button></div>
+              <button class="btn" data-a="copyk" data-v="${i}">🔗 ${esc(nm)} 님 개인 링크 복사 (1:1 톡)</button>
+              <button class="btn" data-a="back">✏️ 준비 화면으로</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    actions = {
+      next: () => { sfx.ok(); hush(); say(`${M.g.n[i]} 님, 눈을 감으세요.`); M.ji = i + 1; persist(); joinEach(); },
+      prev: () => go(i - 1),
+      again: () => { hush(); say(`${M.g.n[i]} 님만 눈을 뜨고, QR을 찍으세요.`); },
+      copyk: (v) => copyText(personalUrl(Number(v)), `${M.g.n[Number(v)]} 님 개인 링크를 복사했어요. 그 사람에게만 1:1로 보내 주세요`),
+      redo: () => go(0),
+      start: () => night(),
+      back: () => setup(),
+    };
+  }
+
+  // 노트북 서버 모드: QR 하나로 접속, 이름은 먼저 고른 사람이 잠급니다.
+  // mid = true 면 게임 도중 [📱 접속 관리]로 들어온 것 (끝나면 낮으로 돌아감)
+  async function joinServer(mid) {
+    stopT(); closeES();
+    if (!mid) { M.phase = 'join'; S.mafia = M; save(); }
+    main.innerHTML = '<div class="screen"><div class="stage"><div class="sub">📡 서버에 연결하는 중…</div></div></div>';
+    await srvReady;
+    try { await register(); } catch (e) {
+      main.innerHTML = `
+        <div class="screen"><div class="stage">
+          <div class="result-big">😵 서버에 연결할 수 없어요</div>
+          <p class="sub" style="text-align:center;color:var(--muted)">노트북에서 <b>node server.js</b> 가 켜져 있는지 확인해 주세요.</p>
+          <div class="row"><button class="btn primary" data-a="retry">🔁 다시 연결</button><button class="btn" data-a="back">✏️ 준비 화면으로</button></div>
+        </div></div>`;
+      actions = { retry: () => joinServer(mid), back: () => setup() };
+      return;
+    }
+    // 노트북에서 localhost로 열었어도 QR에는 폰이 들어올 수 있는 주소(LAN IP)를 넣음
+    const ips = (SRV && SRV.ips) || [], local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+    const ipi = Math.min(M.ipi || 0, Math.max(0, ips.length - 1));
+    const origin = local && ips.length ? `http://${ips[ipi]}:${location.port || 80}` : location.origin;
+    const url = `${origin}/player.html?s=${M.g.c}`;
+    const qr = qrSvg(url);
+    let st = { claimed: M.g.n.map(() => false), online: M.g.n.map(() => false) };
+    const who = () => M.g.n.map((nm, k) => {
+      const tag = st.online[k] ? '✅' : st.claimed[k] ? '🟡' : '⬜';
+      return `<button class="nbtn ${st.claimed[k] ? '' : 'dead'}" ${st.claimed[k] ? `data-a="release" data-v="${k}"` : ''} style="${st.claimed[k] ? '' : 'text-decoration:none'}">${tag} ${esc(nm)}</button>`;
+    }).join('');
+    const count = () => `${st.claimed.filter(Boolean).length} / ${M.g.n.length}명 접속`;
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>📡 ${mid ? '접속 관리' : '역할 확인'}</h2><span class="pill" id="cnt">${count()}</span></div>
+        <div class="stage-wrap">
+          <div class="stage" style="gap:8px">
+            ${qr ? `<div class="qr" style="max-height:62%">${qr}</div>` : ''}
+            <div class="pill" style="font-size:clamp(16px,3.4vmin,26px);word-break:break-all">${esc(url)}</div>
+            <div class="ngrid" id="who">${who()}</div>
+          </div>
+          <div class="controls">
+            <p class="notice" style="margin:0;text-align:center">📱 같은 Wi-Fi(또는 노트북 핫스팟)에서<br>QR을 찍고 자기 이름을 누르세요</p>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">✅ 접속 중 · 🟡 화면 꺼짐 · ⬜ 아직<br>이름을 잘못 골랐으면 그 이름을 눌러 풀어 주세요.</p>
+            ${ips.length > 1 && local ? '<button class="btn" data-a="ip">🌐 다른 주소로 바꾸기 (폰이 안 들어올 때)</button>' : ''}
+            ${mid ? '<button class="btn big primary" data-a="back">↩ 낮으로 돌아가기</button>'
+                  : `<button class="btn big primary" data-a="start">🌙 모두 확인했어요 → 밤 시작</button>
+                     <button class="btn" data-a="setup">✏️ 준비 화면으로</button>`}
+          </div>
+        </div>
+      </div>`;
+    listen((v) => {
+      if (v.t !== 'host') return;
+      st = v; const w = $('#who'), c = $('#cnt');
+      if (w) w.innerHTML = who();
+      if (c) c.textContent = count();
+    });
+    actions = {
+      release: (v) => {
+        const k = Number(v);
+        if (confirm(`${M.g.n[k]} 님의 이름 잠금을 풀까요?\n(그 폰은 접속이 끊기고, 이름을 다시 고를 수 있게 됩니다)`)) hostPost('release', { k }).catch(() => toast('서버에 연결할 수 없어요'));
+      },
+      ip: () => { M.ipi = (ipi + 1) % ips.length; S.mafia = M; save(); joinServer(mid); },
+      start: () => {
+        const left = st.claimed.filter((x) => !x).length;
+        if (left && !confirm(`아직 ${left}명이 접속하지 않았어요. 그래도 밤을 시작할까요?`)) return;
+        closeES(); night();
+      },
+      back: () => { closeES(); day(); },
+      setup: () => { closeES(); setup(); },
+    };
+  }
+
   // ── 밤 ──
   function night() {
+    if (M.mode === 'server') nightServer(); else nightManual();
+  }
+
+  // 서버 모드의 밤: 생존자 전원이 동시에 폰으로 고릅니다 (시민도 '의심 가는 사람'을 골라서
+  // 누가 폰을 두드리는지로 역할이 드러나지 않음). 진행 화면에는 '몇 명 끝났는지'만 나옵니다.
+  async function nightServer() {
+    stopT(); hush(); closeES();
+    M.phase = 'night'; S.mafia = M; save();
+    let prog = { done: 0, total: aliveIdx().length }, told = false, busy = false;
+    const LINE = '밤이 되었습니다. 모두 고개를 숙이고, 다른 사람에게 보이지 않게 폰을 확인해 주세요. 마피아, 의사, 경찰은 대상을 고르고, 시민은 마피아로 의심되는 사람을 한 명 골라 주세요.';
+    function draw() {
+      const all = prog.total > 0 && prog.done >= prog.total;
+      main.innerHTML = `
+        <div class="screen night">
+          <div class="head"><h2>🌙 밤 ${M.day}</h2><span class="sub">각자 폰에서 고르는 중</span></div>
+          <div class="stage">
+            <p class="notice" style="margin:0;text-align:center">🤫 고개를 숙이고 폰 화면을 가려 주세요</p>
+            <div class="bomb">🌙</div>
+            <div class="result-big">${prog.done} / ${prog.total}명 선택 완료</div>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${all ? '모두 골랐어요!' : '마피아는 동료와 같은 사람을 골라야 완료됩니다.'}</p>
+            <button class="btn big ${all ? 'gold' : 'primary'}" data-a="morning" ${all ? '' : 'disabled'}>☀️ 아침으로</button>
+            <div class="row">
+              <button class="btn" data-a="force">⏩ 기다리지 않고 진행</button>
+              <button class="btn" data-a="again">🔊 다시 안내</button>
+              <button class="btn" data-a="manual">✋ 손짓 방식으로</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    async function toMorning() {
+      if (busy) return; busy = true;
+      try {
+        const r = await hostPost('resolve');
+        closeES(); morning(r.kill, r.saved);
+      } catch (e) { busy = false; toast('서버에 연결할 수 없어요. 다시 눌러 주세요'); }
+    }
+    actions = {
+      morning: () => toMorning(),
+      force: () => { if (confirm('아직 고르지 않은 사람이 있어요. 그대로 아침으로 넘어갈까요?\n(마피아끼리 고른 사람이 다르면 아무도 당하지 않습니다)')) toMorning(); },
+      again: () => { hush(); say(LINE); },
+      manual: () => { if (confirm('폰 선택을 그만두고, 손짓 + 사회자 입력 방식으로 이번 밤을 진행할까요?')) { closeES(); nightManual(); } },
+    };
+    draw();
+    say(LINE);
+    try { await register(); } catch (e) { toast('서버에 연결할 수 없어요. [✋ 손짓 방식으로]를 눌러 진행할 수 있어요', 4000); }
+    listen((v) => {
+      if (v.t !== 'host' || v.phase !== 'night' || !v.night) return;
+      prog = v.night; draw();
+      if (prog.total > 0 && prog.done >= prog.total && !told) { told = true; sfx.ok(); say('모두 선택을 마쳤습니다. 아침으로 넘어가 주세요.'); }
+    });
+  }
+
+  // 손짓 + 사회자 입력 방식의 밤 (서버 없이)
+  function nightManual() {
     stopT(); hush(); M.phase = 'night'; persist();
     const steps = ['intro', 'mafia']; if (M.g.d) steps.push('doctor'); if (M.g.p) steps.push('police');
     const LINES = {
@@ -1157,6 +1510,7 @@ screens.mafia = () => {
               <div class="row"><button class="btn primary" data-a="talk">▶ 토론 시작</button><button class="btn" data-a="plus">+30초</button></div>
               <button class="btn big gold" data-a="vote">🗳 투표하기</button>
               <button class="btn" data-a="edit">${edit ? '✅ 수정 완료' : '✏️ 생존자 수정'}</button>
+              ${M.mode === 'server' ? '<button class="btn" data-a="conn">📱 접속 관리</button>' : ''}
               <button class="btn" data-a="quit">🏁 게임 끝내기</button>
             </div>
           </div>
@@ -1172,6 +1526,7 @@ screens.mafia = () => {
         draw();
       },
       flip: (v) => { M.alive[Number(v)] = !M.alive[Number(v)]; persist(); draw(); },
+      conn: () => joinServer(true),
       quit: () => { if (confirm('게임을 끝내고 정체를 공개할까요?')) end(checkWin()); },
     };
     draw();
@@ -1274,7 +1629,18 @@ screens.liar = () => {
   onCleanup(hush);
 
   let L = S.liar || null, stopTimer = null;
-  const persist = () => { S.liar = L; save(); };
+  const srv = () => L && L.mode === 'server';
+  const persist = () => { S.liar = L; save(); if (srv() && L.ht) sync(); };
+  // ── 노트북 서버 모드: 이름 잠금 + 라운드가 바뀌면 폰의 제시어가 자동으로 바뀜 ──
+  async function register() {
+    const j = await NET.post('/api/l/new', { g: L.g, ht: L.ht });
+    L.ht = j.ht; S.liar = L; save();
+    await sync();
+  }
+  function sync() {
+    return NET.post('/api/l/sync', { c: L.g.c, ht: L.ht, r: L.r, phase: L.phase })
+      .catch((e) => (e && e.error === 'nogame' ? register().catch(() => null) : null)); // 서버를 다시 켰으면 재등록
+  }
   const stopT = () => { if (stopTimer) { stopTimer(); stopTimer = null; } };
   onCleanup(stopT);
   const score = () => { const w = (L.log || []).filter((x) => x === 'liar').length; return `시민 ${(L.log || []).length - w}승 · 라이어 ${w}승`; };
@@ -1284,6 +1650,7 @@ screens.liar = () => {
     stopT();
     let txt = ((L && L.g.n) || S.players || []).join('\n');
     let k = L ? L.g.k : 1, mode = L ? L.g.mode : 'normal', cat = L ? L.g.cat : '';
+    let how = (L && L.mode) || (NET.info ? 'server' : 'qr');
     function draw() {
       const n = parseNames(txt).length;
       main.innerHTML = `
@@ -1299,6 +1666,8 @@ screens.liar = () => {
               <div class="row"><button class="btn ${k === 1 ? 'on' : ''}" data-a="k" data-v="1">라이어 1명</button><button class="btn ${k === 2 ? 'on' : ''}" data-a="k" data-v="2">라이어 2명</button></div>
               <div class="row"><button class="btn ${mode === 'normal' ? 'on' : ''}" data-a="mode" data-v="normal">일반 모드</button><button class="btn ${mode === 'fool' ? 'on' : ''}" data-a="mode" data-v="fool">바보 모드</button></div>
               <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${mode === 'fool' ? '바보 모드: 라이어는 다른 제시어를 받고, 자기가 라이어인 줄 모릅니다' : '일반 모드: 라이어는 카테고리만 알고 제시어를 모릅니다'}</p>
+              ${NET.info ? `<div class="row"><button class="btn ${how === 'server' ? 'on' : ''}" data-a="how" data-v="server">📡 노트북 서버</button><button class="btn ${how === 'qr' ? 'on' : ''}" data-a="how" data-v="qr">📱 QR만 (서버 없이)</button></div>
+              <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${how === 'server' ? '이름은 먼저 고른 사람만. 라운드가 바뀌면 폰의 제시어가 자동으로 바뀝니다.' : '폰에서 직접 [다음 ▶]으로 라운드를 맞춥니다.'}</p>` : ''}
               <button class="btn ${S.tts ? 'on' : ''}" data-a="tts">🔊 음성 ${S.tts ? 'ON' : 'OFF'}</button>
               ${L && L.phase !== 'over' ? `<button class="btn gold" data-a="resume">▶ 이어서 하기 (라운드 ${L.r})</button>` : ''}
               <button class="btn big primary" data-a="create">🎲 게임 만들기</button>
@@ -1311,21 +1680,37 @@ screens.liar = () => {
       k: (v) => { k = Number(v); draw(); },
       mode: (v) => { mode = v; draw(); },
       cat: (v) => { cat = v; draw(); },
+      how: (v) => { how = v; draw(); },
       tts: () => { S.tts = !S.tts; save(); draw(); if (S.tts) say('음성 안내를 켰습니다.'); },
       resume: () => (L.phase === 'join' ? join() : round()),
       create: () => {
         const names = parseNames(txt);
         if (names.length < 3) { toast('3명 이상 입력해 주세요'); return; }
         if (k === 2 && names.length < 6) { toast('라이어 2명은 6명 이상일 때 가능해요'); return; }
-        L = { g: { t: 'liar', c: newCode(), n: names, k, mode, cat }, r: 1, log: [], phase: 'join' };
+        if (how === 'server' && !NET.info) { toast('서버에 연결되지 않았어요. node server.js 로 열어 주세요'); return; }
+        L = { g: { t: 'liar', c: newCode(), n: names, k, mode, cat }, r: 1, log: [], phase: 'join', mode: NET.info ? how : 'qr', ht: L && L.ht };
         S.players = names; persist(); sfx.ok(); join();
       },
     };
+    const mine = actions;
     draw();
+    // 서버 확인이 늦게 끝나면 [📡 노트북 서버] 버튼을 붙여 다시 그림
+    if (!NET.info) NET.ready.then(() => { if (NET.info && actions === mine) { if (!(L && L.mode)) how = 'server'; draw(); } });
+  }
+
+  // 서버 모드 접속 화면 (mid = 게임 도중 [📱 접속 관리]로 들어옴)
+  function joinServer(mid) {
+    stopT();
+    if (!mid) { L.phase = 'join'; S.liar = L; save(); }
+    rosterJoinScreen({
+      kind: 'l', code: L.g.c, names: L.g.n, ht: () => L.ht, title: mid ? '접속 관리' : '접속하기', mid,
+      register, onStart: () => round(), onBack: () => round(), onSetup: () => setup(),
+    });
   }
 
   // ── 접속 (QR) ──
   function join() {
+    if (srv()) return joinServer(false);
     stopT(); L.phase = 'join'; persist();
     const url = new URL('player.html?g=' + encodeGame(L.g), location.href).href;
     let qr = '';
@@ -1360,7 +1745,7 @@ screens.liar = () => {
     const R = liarRound(L.g, L.r), n = L.g.n.length;
     const order = Array.from({ length: n }, (_, i) => (R.first + i) % n);
     let left = 120;
-    say(`라운드 ${L.r}. 카테고리는 ${R.cat}입니다. 폰에서 라운드 번호를 확인하고 제시어를 확인해 주세요. ${L.g.n[R.first]} 님부터 시계 방향으로 한 마디씩 설명해 주세요.`);
+    say(`라운드 ${L.r}. 카테고리는 ${R.cat}입니다. ${srv() ? '폰에 나온 제시어를 확인해 주세요.' : '폰에서 라운드 번호를 확인하고 제시어를 확인해 주세요.'} ${L.g.n[R.first]} 님부터 시계 방향으로 한 마디씩 설명해 주세요.`);
     const tick = (s) => { left = s; const t = $('#tm'); if (t) { t.textContent = fmt(s); t.classList.toggle('warn', s <= 10); } if (s <= 5 && s > 0) sfx.tick(); };
     const run = () => { stopT(); stopTimer = countdown(left, tick, () => { stopTimer = null; sfx.boom(); say('토론 시간이 끝났습니다. 투표를 시작합니다.'); }); };
     main.innerHTML = `
@@ -1369,13 +1754,14 @@ screens.liar = () => {
         <div class="stage-wrap">
           <div class="stage" style="gap:6px;overflow:auto;justify-content:safe center">
             <div class="row"><span class="pill">카테고리</span><span class="category pop" style="font-size:clamp(24px,6vmin,48px)">${esc(R.cat)}</span><span class="timer" id="tm" style="font-size:clamp(22px,6vmin,48px)">${fmt(left)}</span></div>
-            <p class="notice" style="margin:0">📱 폰에서 라운드 ${L.r} 확인 → 카드를 꾹 눌러 제시어 확인</p>
+            <p class="notice" style="margin:0">${srv() ? '📱 폰의 카드를 꾹 눌러 제시어 확인' : `📱 폰에서 라운드 ${L.r} 확인 → 카드를 꾹 눌러 제시어 확인`}</p>
             <div class="ngrid">${order.map((k, i) => `<div class="nbtn">${esc(L.g.n[k])}<small>${i + 1}번째</small></div>`).join('')}</div>
           </div>
           <div class="controls">
             <div class="row"><button class="btn primary" data-a="talk">▶ 토론 2분</button><button class="btn" data-a="plus">+30초</button></div>
             <button class="btn big gold" data-a="vote">🗳 투표하기</button>
             <button class="btn" data-a="skip">⏭ 이 라운드 건너뛰기</button>
+            ${srv() ? '<button class="btn" data-a="conn">📱 접속 관리</button>' : ''}
             <button class="btn" data-a="quit">🏁 게임 끝내기</button>
           </div>
         </div>
@@ -1385,6 +1771,7 @@ screens.liar = () => {
       plus: () => { left += 30; tick(left); if (stopTimer) run(); },
       vote: () => vote(R),
       skip: () => { if (confirm('이 라운드를 건너뛸까요? (결과 기록 없이 다음 라운드로)')) nextRound(); },
+      conn: () => joinServer(true),
       quit: () => { if (confirm('라이어 게임을 끝낼까요?')) { L.phase = 'over'; persist(); go('home'); } },
     };
   }
@@ -1444,7 +1831,7 @@ screens.liar = () => {
   }
 
   function result(R, liarWin, msg) {
-    L.log = [...(L.log || []), liarWin ? 'liar' : 'citizen']; persist();
+    L.log = [...(L.log || []), liarWin ? 'liar' : 'citizen']; L.phase = 'result'; persist(); // 서버 모드: 폰에도 정답 공개
     const liarNames = R.liars.map((k) => L.g.n[k]).join(', ');
     say(`${msg} ${liarWin ? '라이어의 승리입니다!' : '시민의 승리입니다!'} 제시어는 ${R.word}, 라이어는 ${liarNames} 님이었습니다.`);
     liarWin ? sfx.boom() : sfx.fanfare();
@@ -1470,8 +1857,8 @@ screens.liar = () => {
   }
 
   function nextRound() {
-    L.r++; persist();
-    say(`라운드 ${L.r}입니다. 모두 폰에서 다음 버튼을 눌러 라운드 ${L.r}로 넘어가 주세요.`);
+    L.r++; L.phase = 'round'; persist();
+    say(srv() ? `라운드 ${L.r}입니다. 폰에 새 제시어가 나왔습니다.` : `라운드 ${L.r}입니다. 모두 폰에서 다음 버튼을 눌러 라운드 ${L.r}로 넘어가 주세요.`);
     round();
   }
 
@@ -1518,5 +1905,12 @@ screens.settings = () => {
 };
 
 // ═══════════════════════ 시작 ═══════════════════════
+screens.phones = () => phonesScreen();
+
 renderScore();
 go('home');
+NET.ready.then(() => {
+  if (!NET.info) return;
+  if (S.partyHt) Party.open(); // 예전에 연 폰 연결 방이 있으면 다시 연결
+  if (current === 'home') go('home');
+});

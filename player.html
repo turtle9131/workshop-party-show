@@ -8,23 +8,256 @@
   <title>마피아 역할 확인</title>
   <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=14">
+  <link rel="stylesheet" href="css/style.css?v=17">
 </head>
 <body>
   <main id="main"></main>
 
   <script src="js/data.js?v=14"></script>
   <script src="js/order.js?v=14"></script>
-  <script src="js/mafia.js?v=14"></script>
+  <script src="js/mafia.js?v=17"></script>
   <script>
     'use strict';
     const main = document.getElementById('main');
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-    let g = null;
-    try { g = decodeGame(new URLSearchParams(location.search).get('g') || ''); } catch (e) { g = null; }
+    // 꾹 누르는 동안만 카드 내용 보이기 (onRe가 있으면 [이름을 잘못 골랐어요] 버튼 연결)
+    function holdToReveal(onRe) {
+      const card = document.getElementById('card');
+      const on = (e) => { e.preventDefault(); card.classList.add('show'); };
+      const off = () => card.classList.remove('show');
+      card.addEventListener('pointerdown', on);
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => card.addEventListener(ev, off));
+      card.addEventListener('contextmenu', (e) => e.preventDefault());
+      const re = document.getElementById('re');
+      if (re && onRe) re.addEventListener('click', onRe);
+    }
 
-    if (!g || !Array.isArray(g.n)) {
+    // 마피아 역할 카드 (전체 링크·개인 링크 공용)
+    function mafiaCard(name, code, r, mates, onRe) {
+      const info = ROLES[r];
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>${esc(name)} 님</h2><span class="pill">코드 ${esc(code)}</span></div>
+          <div class="role-card" id="card">
+            <div class="cover">👆<br>꾹 누르고 있는 동안만<br>내 역할이 보여요</div>
+            <div class="inner">
+              <div class="role-ic">${info.ic}</div>
+              <div class="result-big">${info.n}</div>
+              <p class="role-d">${esc(info.d)}</p>
+              ${r === 'mafia' ? `<p class="notice" style="margin:8px 0 0">동료 마피아: ${mates.length ? mates.map(esc).join(', ') : '없음 (혼자예요)'}</p>` : ''}
+            </div>
+          </div>
+          <p class="sub" style="margin:0;text-align:center;color:var(--muted)">주변 사람에게 화면이 보이지 않게 조심하세요.</p>
+          ${onRe ? '<button class="btn" id="re">이름을 잘못 골랐어요</button>'
+                 : '<p class="sub" style="margin:0;text-align:center;color:var(--muted)">이 링크는 나만의 개인 링크예요. 다른 사람에게 보여 주지 마세요.</p>'}
+        </div>`;
+      holdToReveal(onRe);
+    }
+
+    // ═══════ 노트북 서버 모드 (player.html?s=게임코드) ═══════
+    // 역할은 서버에만 있고, 이 폰에는 내 몫의 정보만 실시간(SSE)으로 옵니다.
+    // t = 'm'(마피아) | 'l'(라이어)
+    function serverMode(c, t) {
+      const API = '/api/' + t, KEY = (t === 'l' ? 'liar-srv-' : 'mafia-srv-') + c, TITLE = t === 'l' ? '🤥 라이어 게임' : '🕵️ 마피아 게임';
+      let me = null, es = null, v = null, sel = null, selDay = 0, last = '', retry = null;
+      try { me = JSON.parse(localStorage.getItem(KEY)); } catch (e) { me = null; }
+      const store = (x) => { me = x; try { x ? localStorage.setItem(KEY, JSON.stringify(x)) : localStorage.removeItem(KEY); } catch (e) { /* 저장 불가 */ } };
+      const closeES = () => { if (es) { es.close(); es = null; } clearTimeout(retry); };
+      const head = (title, extra = '') => `<div class="head"><h2>${title}</h2><span class="pill">코드 ${esc(c)}${extra}</span></div>`;
+      const msgScreen = (big, sub, btn) => {
+        main.innerHTML = `<div class="screen" style="justify-content:center;text-align:center">
+          <div class="result-big">${big}</div><p class="sub" style="color:var(--muted)">${sub}</p>
+          ${btn ? `<button class="btn primary" id="act">${btn}</button>` : ''}</div>`;
+      };
+
+      // 이름 고르기: 이미 선택된 이름은 잠겨 있어서 남의 이름으로 들어갈 수 없음
+      async function lobby(note) {
+        closeES(); v = null; last = '';
+        let L;
+        try {
+          const r = await fetch(`${API}/lobby?c=${encodeURIComponent(c)}`, { cache: 'no-store' });
+          if (r.status === 404) { msgScreen('🔎 게임을 찾을 수 없어요', '진행 화면에서 역할 확인(QR) 화면을 띄운 뒤 다시 시도해 주세요.', '🔁 다시 시도'); document.getElementById('act').onclick = () => lobby(); return; }
+          L = await r.json();
+        } catch (e) {
+          msgScreen('📡 서버에 연결할 수 없어요', '노트북과 <b>같은 Wi-Fi(또는 노트북 핫스팟)</b>에 연결돼 있는지 확인해 주세요.', '🔁 다시 시도');
+          document.getElementById('act').onclick = () => lobby(); return;
+        }
+        main.innerHTML = `
+          <div class="screen">
+            ${head(TITLE)}
+            ${note ? `<p class="notice" style="margin:0">${esc(note)}</p>` : ''}
+            <p class="notice" style="margin:0">본인 이름을 눌러 주세요</p>
+            <p class="sub" style="margin:0;color:var(--muted)">🔒 표시는 이미 누가 고른 이름이에요. 내 이름이 잠겨 있으면 사회자에게 말해 주세요.</p>
+            <div class="ngrid" style="justify-content:flex-start">
+              ${L.names.map((nm, k) => (L.claimed[k]
+                ? `<button class="nbtn dead" disabled>🔒 ${esc(nm)}</button>`
+                : `<button class="nbtn" data-k="${k}">${esc(nm)}</button>`)).join('')}
+            </div>
+            <button class="btn" id="act">🔁 새로고침</button>
+          </div>`;
+        document.getElementById('act').onclick = () => lobby();
+        main.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {
+          const k = Number(b.dataset.k);
+          if (!confirm(`${L.names[k]} 님이 맞나요?\n한 번 고르면 바꿀 수 없어요.`)) return;
+          try {
+            const r = await fetch(API + '/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ c, k }) });
+            if (r.status === 409) { alert('방금 다른 사람이 이 이름을 골랐어요. 본인 이름이라면 사회자에게 말해 주세요.'); return lobby(); }
+            if (!r.ok) throw new Error();
+            store(await r.json()); connect();
+          } catch (e) { alert('서버에 연결할 수 없어요. 다시 시도해 주세요.'); }
+        }));
+      }
+
+      function connect() {
+        closeES();
+        if (!me || !me.pt) return lobby();
+        const src = es = new EventSource(`${API}/events?c=${encodeURIComponent(c)}&pt=${encodeURIComponent(me.pt)}`);
+        src.onmessage = (e) => {
+          let d; try { d = JSON.parse(e.data); } catch (err) { return; }
+          if (d.t === 'kicked') { store(null); return lobby('사회자가 이름 선택을 풀었어요. 다시 골라 주세요.'); }
+          if (d.t === 'player') { v = d; render(); }
+        };
+        // 끊기면: 토큰이 아직 유효한지 확인하고 다시 연결 (서버를 다시 켰으면 이름부터 다시)
+        src.onerror = () => {
+          if (src.readyState !== 2 || es !== src) { setBanner(true); return; }
+          setBanner(true);
+          retry = setTimeout(async () => {
+            const ac = new AbortController();
+            try {
+              const r = await fetch(src.url, { signal: ac.signal, cache: 'no-store' }); ac.abort();
+              if (r.status === 403) { store(null); return lobby('연결이 초기화됐어요. 이름을 다시 골라 주세요.'); }
+              if (r.status === 404) return lobby();
+            } catch (err) { /* 오프라인 → 다시 시도 */ }
+            if (es === src) connect();
+          }, 2000);
+        };
+        src.onopen = () => setBanner(false);
+      }
+      function setBanner(on) { const b = document.getElementById('net'); if (b) b.style.display = on ? 'block' : 'none'; }
+
+      async function pick(t) {
+        try {
+          const r = await fetch(API + '/pick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ c, pt: me.pt, t }) });
+          if (!r.ok && r.status !== 409) throw new Error();
+        } catch (e) { alert('전송하지 못했어요. 다시 눌러 주세요.'); }
+      }
+
+      const roleCard = (extra = '') => {
+        const info = { ...ROLES[v.role] };
+        if (v.role === 'police') info.d = '밤마다 한 명을 조사할 수 있어요. 조사 결과는 내 폰에만 나옵니다.';
+        const pol = v.role === 'police' && v.police.length
+          ? `<p class="role-d" style="margin-top:8px">🔍 조사 기록<br>${v.police.map((p) => `${p.day}일째 ${esc(p.t)} ${p.mafia ? '👍 마피아' : '👎 아님'}`).join('<br>')}</p>` : '';
+        return `
+          <div class="role-card" id="card">
+            <div class="cover">👆<br>꾹 누르고 있는 동안만<br>내 역할이 보여요</div>
+            <div class="inner">
+              <div class="role-ic">${info.ic}</div>
+              <div class="result-big">${info.n}</div>
+              <p class="role-d">${esc(info.d)}</p>
+              ${v.role === 'mafia' ? `<p class="notice" style="margin:8px 0 0">동료 마피아: ${v.mates.length ? v.mates.map(esc).join(', ') : '없음 (혼자예요)'}</p>` : ''}
+              ${pol}${extra}
+            </div>
+          </div>`;
+      };
+
+      function nightHtml() {
+        const n = v.night, N = v.names;
+        if (selDay !== v.day) { selDay = v.day; sel = null; }
+        const grid = (on) => `<div class="ngrid">${n.targets.map((k) => `<button class="nbtn ${on === k ? 'on' : ''}" data-t="${k}">${esc(N[k])}</button>`).join('')}</div>`;
+        if (v.role === 'mafia') {
+          const mates = n.mates.length
+            ? n.mates.map((m) => `${esc(m.name)}: ${m.pick === null ? '고르는 중…' : esc(N[m.pick])}`).join('<br>') : '';
+          if (n.agreed !== null) return `<div class="result-big">✅ ${esc(N[n.agreed])}</div><p class="notice" style="margin:0">확정됐어요. 고개를 숙이고 아침을 기다려 주세요.</p>`;
+          const cur = sel !== null ? sel : n.pick;
+          return `<p class="notice" style="margin:0">🔪 제거할 사람을 고르세요${n.mates.length ? '. 동료와 같은 사람을 골라야 확정돼요.' : '.'}</p>
+            ${mates ? `<div class="pill" style="text-align:center">${mates}${n.pick !== null ? `<br>나: ${esc(N[n.pick])}` : ''}</div>` : ''}${grid(cur)}
+            <button class="btn big primary" id="ok" ${sel === null || sel === n.pick ? 'disabled' : ''}>${n.mates.length ? '이 사람으로 정하기' : '확정'}</button>`;
+        }
+        if (n.locked) {
+          const res = v.role === 'police'
+            ? `<div class="result-big">${n.result ? '👍' : '👎'} ${esc(N[n.pick])} 님은<br>${n.result ? '마피아입니다!' : '마피아가 아닙니다'}</div>` : `<div class="result-big">✅ ${esc(N[n.pick])}</div>`;
+          return `${res}<p class="notice" style="margin:0">선택 완료. 고개를 숙이고 아침을 기다려 주세요.</p>`;
+        }
+        const ask = { doctor: '💉 마피아로부터 지킬 사람을 고르세요 (나도 가능)', police: '🚓 조사할 사람을 고르세요', citizen: '🙂 마피아로 의심되는 사람을 고르세요' }[v.role];
+        return `<p class="notice" style="margin:0">${ask}</p>${grid(sel)}
+          <button class="btn big primary" id="ok" ${sel === null ? 'disabled' : ''}>확정</button>`;
+      }
+
+      // 라이어: 라운드가 바뀌면 서버가 새 제시어를 보내 줌 (폰에서 [다음]을 누를 필요 없음)
+      function renderLiar() {
+        const nm = v.names[v.me];
+        let body;
+        if (v.phase === 'round' || v.phase === 'result') {
+          const inner = v.liar
+            ? `<div class="role-ic">🤥</div><div class="result-big">당신은 라이어!</div>
+               <p class="role-d">제시어를 모릅니다. 다른 사람들의 설명을 잘 듣고 들키지 않게 설명하세요.</p>`
+            : `<div class="role-d" style="margin:0 0 6px">제시어</div><div class="result-big" style="font-size:44px">${esc(v.word)}</div>
+               <p class="role-d">라이어가 눈치채지 못하게, 너무 뻔하지 않게 설명하세요.</p>`;
+          const res = v.result ? `<div class="pill" style="text-align:center;font-size:18px">🎯 정답: <b>${esc(v.result.word)}</b>${v.mode === 'fool' ? ` · 라이어 제시어: <b>${esc(v.result.fake)}</b>` : ''}<br>🤥 라이어: <b>${v.result.liars.map(esc).join(', ')}</b></div>` : '';
+          body = `<div class="result-big" style="text-align:center">라운드 ${v.r}</div>
+            <div class="pill" style="text-align:center;font-size:18px">카테고리: ${esc(v.cat)} · ${esc(v.first)} 님부터</div>
+            ${res}
+            <div class="role-card" id="card"><div class="cover">👆<br>꾹 누르고 있는 동안만<br>제시어가 보여요</div><div class="inner">${inner}</div></div>`;
+        } else if (v.phase === 'over') {
+          body = '<p class="notice" style="margin:0">🏁 게임이 끝났어요. 수고하셨습니다!</p>';
+        } else {
+          body = '<p class="notice" style="margin:0">✅ 접속 완료! 사회자가 라운드를 시작하면 이 화면에 제시어가 나와요. 화면을 켜 두세요.</p>';
+        }
+        main.innerHTML = `<div class="screen">${head(esc(nm) + ' 님')}<p class="notice" id="net" style="margin:0;display:none">📡 다시 연결하는 중…</p>${body}</div>`;
+        if (document.getElementById('card')) holdToReveal(null);
+        if (navigator.vibrate && v.phase === 'round' && lastRound !== v.r) navigator.vibrate(80);
+        lastRound = v.r;
+      }
+      let lastRound = 0;
+
+      function render() {
+        const key = JSON.stringify([v, sel]);
+        if (key === last) return; last = key;
+        if (v.kind === 'liar') return renderLiar();
+        const nm = v.names[v.me], dead = !v.alive[v.me];
+        const net = '<p class="notice" id="net" style="margin:0;display:none">📡 다시 연결하는 중…</p>';
+        let body;
+        if (v.over) {
+          const t = v.over === 'mafia' ? '🔪 마피아 승리!' : v.over === 'citizen' ? '🎉 시민 승리!' : '🏁 게임 종료';
+          body = `<div class="result-big" style="text-align:center">${t}</div>
+            <div class="ngrid">${v.names.map((x, k) => `<div class="nbtn ${v.alive[k] ? '' : 'dead'} ${v.roles[k] === 'mafia' ? 'mafia' : ''}">${esc(x)}<small>${ROLES[v.roles[k]].ic} ${ROLES[v.roles[k]].n}</small></div>`).join('')}</div>`;
+        } else if (dead) {
+          body = `<p class="notice" style="margin:0">☠️ 탈락했어요. 이제 말하지 말고 조용히 관전해 주세요.</p>${roleCard()}`;
+        } else if (v.phase === 'night' && v.night) {
+          body = `<div class="result-big" style="text-align:center">🌙 밤 ${v.day}</div>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">주변 사람에게 화면이 보이지 않게 가려 주세요</p>${nightHtml()}`;
+        } else {
+          const st = v.phase === 'day' ? `☀️ 낮 ${v.day} · 토론 시간이에요` : v.phase === 'night' ? '🌙 밤이에요. 사회자 안내를 따라 주세요' : '✅ 접속 완료! 사회자가 밤을 시작할 때까지 기다려 주세요';
+          body = `<p class="notice" style="margin:0">${st}</p>${roleCard()}
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">밤이 되면 이 화면에서 바로 대상을 고르게 돼요. 화면을 켜 두세요.</p>`;
+        }
+        main.innerHTML = `<div class="screen">${head(esc(nm) + ' 님')}${net}${body}</div>`;
+        if (document.getElementById('card')) holdToReveal(null);
+        main.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
+          sel = Number(b.dataset.t); render();
+        }));
+        const ok = document.getElementById('ok');
+        if (ok) ok.addEventListener('click', () => { if (sel !== null) pick(sel); });
+      }
+
+      document.title = t === 'l' ? '라이어 게임 제시어' : '마피아 역할 확인';
+      me ? connect() : lobby();
+      // 화면이 다시 켜지면 바로 재연결
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && me && (!es || es.readyState === 2)) connect(); });
+    }
+
+    const qs = new URLSearchParams(location.search);
+    let g = null, pg = null;
+    try { pg = decodeGame(qs.get('p') || ''); } catch (e) { pg = null; }
+    try { g = decodeGame(qs.get('g') || ''); } catch (e) { g = null; }
+
+    if (/^\d{4}$/.test(qs.get('s') || '')) {
+      serverMode(qs.get('s'), qs.get('t') === 'l' ? 'l' : 'm');
+    } else if (pg && typeof pg.n === 'string' && ROLES[pg.r]) {
+      // 개인 링크: 내 역할만 들어 있으므로 이름 고르기 없이 바로 보여 줌
+      mafiaCard(pg.n, pg.c, pg.r, Array.isArray(pg.t) ? pg.t : [], null);
+    } else if (!g || !Array.isArray(g.n)) {
       main.innerHTML = `<div class="screen" style="justify-content:center;text-align:center">
         <div class="result-big">😵 링크가 올바르지 않아요</div>
         <p class="sub" style="color:var(--muted)">TV 화면의 QR 코드를 다시 찍거나, 단톡방 링크를 다시 눌러 주세요.</p></div>`;
@@ -59,20 +292,11 @@
         }));
       }
 
-      // 꾹 누르는 동안만 카드 내용 보이기
-      function holdToReveal() {
-        const card = document.getElementById('card');
-        const on = (e) => { e.preventDefault(); card.classList.add('show'); };
-        const off = () => card.classList.remove('show');
-        card.addEventListener('pointerdown', on);
-        ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => card.addEventListener(ev, off));
-        card.addEventListener('contextmenu', (e) => e.preventDefault());
-        document.getElementById('re').addEventListener('click', () => {
-          if (!confirm('이름을 다시 고를까요?')) return;
-          try { localStorage.removeItem(KEY); } catch (e) { /* 저장 불가 */ }
-          me = null; pickName();
-        });
-      }
+      const repick = () => {
+        if (!confirm('이름을 다시 고를까요?')) return;
+        try { localStorage.removeItem(KEY); } catch (e) { /* 저장 불가 */ }
+        me = null; pickName();
+      };
 
       function showLiar() {
         let r = 1;
@@ -103,30 +327,14 @@
           const setR = (v) => { r = v; try { localStorage.setItem(RKEY, String(r)); } catch (e) { /* 저장 불가 */ } draw(); };
           document.getElementById('prev').addEventListener('click', () => setR(r - 1));
           document.getElementById('next').addEventListener('click', () => setR(r + 1));
-          holdToReveal();
+          holdToReveal(repick);
         };
         draw();
       }
 
       function showMafia() {
-        const r = roles[me], info = ROLES[r];
-        const mates = r === 'mafia' ? g.n.filter((_, k) => k !== me && roles[k] === 'mafia') : [];
-        main.innerHTML = `
-          <div class="screen">
-            <div class="head"><h2>${esc(g.n[me])} 님</h2><span class="pill">코드 ${esc(g.c)}</span></div>
-            <div class="role-card" id="card">
-              <div class="cover">👆<br>꾹 누르고 있는 동안만<br>내 역할이 보여요</div>
-              <div class="inner">
-                <div class="role-ic">${info.ic}</div>
-                <div class="result-big">${info.n}</div>
-                <p class="role-d">${esc(info.d)}</p>
-                ${r === 'mafia' ? `<p class="notice" style="margin:8px 0 0">동료 마피아: ${mates.length ? mates.map(esc).join(', ') : '없음 (혼자예요)'}</p>` : ''}
-              </div>
-            </div>
-            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">주변 사람에게 화면이 보이지 않게 조심하세요.</p>
-            <button class="btn" id="re">이름을 잘못 골랐어요</button>
-          </div>`;
-        holdToReveal();
+        const p = personalGame(g, me);
+        mafiaCard(p.n, p.c, p.r, p.t, repick);
       }
     }
   </script>

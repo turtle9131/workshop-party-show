@@ -256,3 +256,19 @@ input, textarea { font-family: inherit; }
 #flash { position: fixed; inset: 0; pointer-events: none; z-index: 90; opacity: 0; }
 #flash.go { animation: flash .6s; }
 @keyframes flash { 0% { opacity: .75; } 100% { opacity: 0; } }
+
+/* ── 📱 폰 연결 (노트북 서버) ── */
+.pbadge { position: fixed; right: 12px; bottom: 12px; z-index: 40; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--panel-line);
+  background: rgba(13, 11, 30, .85); color: #fff; font-weight: 800; font-size: 15px; cursor: pointer; }
+.buzzbar { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 45; display: flex; flex-direction: column; gap: 8px; align-items: center;
+  padding: 12px 18px; border-radius: 16px; background: rgba(13, 11, 30, .92); border: 3px solid var(--gold); box-shadow: 0 10px 40px rgba(0, 0, 0, .5);
+  max-width: calc(100vw - 32px); }
+.buzzbar.A { border-color: var(--A); }
+.buzzbar.B { border-color: var(--B); }
+.buzzbar .who { animation: pop .35s ease; font-family: 'Black Han Sans', sans-serif; font-size: clamp(28px, 6vmin, 56px); text-align: center; }
+.buzzbar.A .who { color: var(--A); }
+.buzzbar.B .who { color: var(--B); }
+.buzz-btn { flex: 1; min-height: 50vh; width: 100%; border: 0; border-radius: 50%; aspect-ratio: 1; max-height: 70vh; align-self: center;
+  color: #fff; font-family: 'Black Han Sans', sans-serif; font-size: clamp(40px, 14vw, 80px); line-height: 1.2;
+  box-shadow: 0 12px 0 rgba(0, 0, 0, .35), 0 0 40px rgba(255, 255, 255, .15); touch-action: manipulation; user-select: none; }
+.buzz-btn:active, .buzz-btn:disabled { transform: translateY(8px); box-shadow: 0 4px 0 rgba(0, 0, 0, .35); filter: brightness(.85); }

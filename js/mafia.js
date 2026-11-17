@@ -38,3 +38,12 @@ function decodeGame(s) {
   while (s.length % 4) s += '=';
   return JSON.parse(decodeURIComponent(escape(atob(s))));
 }
+
+// 개인 링크: 전체 명단 없이 그 사람의 역할(마피아면 동료 이름)만 담습니다.
+// → 링크를 해석해도 다른 사람의 역할은 알 수 없습니다.
+// 반환값 = { c: 게임 코드, n: 이름, r: 역할 키, t: [동료 마피아 이름...] }
+function personalGame(g, k) {
+  const roles = mafiaRoles(g), r = roles[k];
+  const t = r === 'mafia' ? g.n.filter((_, j) => j !== k && roles[j] === 'mafia') : [];
+  return { c: g.c, n: g.n[k], r, t };
+}

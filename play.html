@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d0b1e">
+  <meta name="robots" content="noindex">
+  <title>파티 쇼 · 내 폰</title>
+  <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=17">
+</head>
+<body>
+  <main id="main"></main>
+  <script>
+    // 📱 폰 연결 참가자 화면 (노트북 서버 전용)
+    // 한 번 접속해 두면, 진행 화면이 여는 게임에 맞춰 화면이 바뀝니다:
+    //   🔔 버저(노래·OST·초성·사진 퀴즈) · 💣 폭탄 돌리기 · 🎨 캐치마인드 · 🔥 올인 답 제출
+    'use strict';
+    const main = document.getElementById('main');
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const KEY = 'party-me';
+    const post = (route, body) => fetch('/api/p/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const buzz = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 미지원 */ } };
+    const TEAMC = ['var(--A)', 'var(--B)'];
+
+    let me = null, es = null, v = null, retry = null, lastKey = '', prevKind = null, prevHolding = false;
+    try { me = JSON.parse(localStorage.getItem(KEY)); } catch (e) { me = null; }
+    const store = (x) => { me = x; try { x ? localStorage.setItem(KEY, JSON.stringify(x)) : localStorage.removeItem(KEY); } catch (e) { /* 저장 불가 */ } };
+    const closeES = () => { if (es) { es.close(); es = null; } clearTimeout(retry); };
+    const msg = (big, sub, btn, fn) => {
+      main.innerHTML = `<div class="screen" style="justify-content:center;text-align:center">
+        <div class="result-big">${big}</div><p class="sub" style="color:var(--muted)">${sub}</p>
+        ${btn ? `<button class="btn primary" id="act">${btn}</button>` : ''}</div>`;
+      if (btn) document.getElementById('act').onclick = fn;
+    };
+
+    // ── 접속: 팀 나누기 명단이 있으면 이름만 고르고, 없으면 이름 입력 + 팀 선택 ──
+    async function lobby(note) {
+      closeES(); v = null; lastKey = '';
+      let L;
+      try {
+        const r = await fetch('/api/p/lobby', { cache: 'no-store' });
+        if (r.status === 404) return msg('⏳ 아직 준비 중이에요', '진행 화면에서 <b>📱 폰 연결</b>을 연 뒤 다시 시도해 주세요.', '🔁 다시 시도', () => lobby());
+        L = await r.json();
+      } catch (e) {
+        return msg('📡 서버에 연결할 수 없어요', '노트북과 <b>같은 Wi-Fi(또는 노트북 핫스팟)</b>에 연결돼 있는지 확인해 주세요.', '🔁 다시 시도', () => lobby());
+      }
+      const taken = new Set(L.taken);
+      let free = !L.roster, team = null;
+      const draw = () => {
+        main.innerHTML = `
+          <div class="screen">
+            <div class="head"><h2>🎉 파티 쇼 접속</h2></div>
+            ${note ? `<p class="notice" style="margin:0">${esc(note)}</p>` : ''}
+            ${!free ? `
+              <p class="notice" style="margin:0">본인 이름을 눌러 주세요</p>
+              ${[0, 1].map((t) => `
+                <div class="tname" style="color:${TEAMC[t]};font-weight:800">${esc(L.teamNames[t])}</div>
+                <div class="ngrid" style="justify-content:flex-start">
+                  ${L.roster[t].map((nm) => (taken.has(nm)
+                    ? `<button class="nbtn dead" disabled>🔒 ${esc(nm)}</button>`
+                    : `<button class="nbtn" data-n="${esc(nm)}" data-t="${t}">${esc(nm)}</button>`)).join('')}
+                </div>`).join('')}
+              <button class="btn" id="free">명단에 내 이름이 없어요</button>`
+            : `
+              <p class="notice" style="margin:0">이름을 적고 팀을 고르세요</p>
+              <input id="nm" class="names" style="min-height:0;flex:0" maxlength="20" placeholder="이름" autocomplete="off">
+              <div class="row">${[0, 1].map((t) => `<button class="btn ${t ? 'B' : 'A'} ${team === t ? 'on' : ''}" data-team="${t}" style="${team === t ? 'outline:3px solid #fff' : 'opacity:.7'}">${esc(L.teamNames[t])}</button>`).join('')}</div>
+              <button class="btn big primary" id="go">접속하기</button>
+              ${L.roster ? '<button class="btn" id="back">↩ 명단에서 고르기</button>' : ''}`}
+            <button class="btn" id="re">🔁 새로고침</button>
+          </div>`;
+        document.getElementById('re').onclick = () => lobby();
+        main.querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => {
+          if (confirm(`${b.dataset.n} 님이 맞나요?`)) join(b.dataset.n, Number(b.dataset.t));
+        }));
+        const f = document.getElementById('free'); if (f) f.onclick = () => { free = true; draw(); };
+        const bk = document.getElementById('back'); if (bk) bk.onclick = () => { free = false; draw(); };
+        main.querySelectorAll('[data-team]').forEach((b) => b.addEventListener('click', () => {
+          const keep = document.getElementById('nm').value; team = Number(b.dataset.team); draw(); document.getElementById('nm').value = keep;
+        }));
+        const g = document.getElementById('go');
+        if (g) g.onclick = () => {
+          const name = document.getElementById('nm').value.trim();
+          if (!name) return alert('이름을 적어 주세요');
+          if (team === null) return alert('팀을 골라 주세요');
+          join(name, team);
+        };
+      };
+      draw();
+    }
+    async function join(name, team) {
+      try {
+        const r = await post('join', { name, team });
+        if (r.status === 409) { alert('이미 접속한 이름이에요. 본인 이름이라면 사회자에게 말해 주세요.'); return lobby(); }
+        if (!r.ok) throw new Error();
+        store({ pt: (await r.json()).pt }); connect();
+      } catch (e) { alert('서버에 연결할 수 없어요. 다시 시도해 주세요.'); }
+    }
+
+    function connect() {
+      closeES();
+      if (!me || !me.pt) return lobby();
+      const src = es = new EventSource('/api/p/events?pt=' + encodeURIComponent(me.pt));
+      src.onmessage = (e) => {
+        let d; try { d = JSON.parse(e.data); } catch (err) { return; }
+        if (d.t === 'kicked') { store(null); return lobby('사회자가 접속을 끊었어요. 다시 접속해 주세요.'); }
+        if (d.t === 'party') { v = d; render(); }
+      };
+      src.onerror = () => {
+        setNet(true);
+        if (src.readyState !== 2 || es !== src) return;
+        retry = setTimeout(async () => {
+          const ac = new AbortController();
+          try {
+            const r = await fetch(src.url, { signal: ac.signal, cache: 'no-store' }); ac.abort();
+            if (r.status === 403) { store(null); return lobby('연결이 초기화됐어요. 다시 접속해 주세요.'); }
+            if (r.status === 404) return lobby();
+          } catch (err) { /* 오프라인 → 다시 시도 */ }
+          if (es === src) connect();
+        }, 2000);
+      };
+      src.onopen = () => setNet(false);
+    }
+    function setNet(on) { const b = document.getElementById('net'); if (b) b.style.display = on ? 'block' : 'none'; }
+
+    // ── 화면 그리기 ──
+    function render() {
+      // 그림판은 다시 그리면 안 되므로 그리는 중에는 위쪽 정보만 갱신
+      const key = JSON.stringify(v);
+      if (key === lastKey) return; lastKey = key;
+      if (v.kind === 'draw' && v.isDrawer && !v.done && pad) return updateDrawInfo();
+      // 올인 답을 입력하는 중이면 입력창은 두고 '현재 우리 팀 답'만 갱신
+      if (v.kind === 'allin' && v.open && document.getElementById('ans')) return updateAllin();
+      pad = null;
+      const t = v.me.team, head = `
+        <div class="head"><h2 style="color:${TEAMC[t]}">${esc(v.me.name)}</h2><span class="pill" style="border-color:${TEAMC[t]}">${esc(v.teamNames[t])}</span></div>
+        <p class="notice" id="net" style="margin:0;display:none">📡 다시 연결하는 중…</p>`;
+      let body = '';
+      if (v.kind === 'buzz') body = buzzHtml();
+      else if (v.kind === 'bomb') body = bombHtml();
+      else if (v.kind === 'draw') body = drawHtml();
+      else if (v.kind === 'allin') body = allinHtml();
+      else body = `<div class="stage"><div class="bomb">📺</div><p class="notice" style="margin:0;text-align:center">✅ 접속 완료!<br>진행 화면(TV)을 봐 주세요.</p>
+        <p class="sub" style="margin:0;text-align:center;color:var(--muted)">버저 퀴즈·폭탄 돌리기·캐치마인드·올인 때<br>이 화면이 자동으로 바뀝니다. 화면을 켜 두세요.</p></div>`;
+      main.innerHTML = `<div class="screen">${head}${body}</div>`;
+      bind();
+      if (v.kind !== prevKind) buzz(40);
+      prevKind = v.kind;
+    }
+
+    // 🔔 버저: 손가락이 닿는 순간(pointerdown) 바로 전송
+    function buzzHtml() {
+      const t = v.me.team;
+      if (v.first) {
+        const mine = v.first.id === v.me.id, same = v.first.team === t;
+        return `<div class="stage"><div class="result-big" style="text-align:center;color:${TEAMC[v.first.team]}">${mine ? '🎉 내가 제일 빨랐어요!<br>정답을 외치세요!' : `🔔 ${esc(v.teamNames[v.first.team])} ${esc(v.first.name)}`}</div>
+          <p class="sub" style="text-align:center;color:var(--muted)">${mine ? '' : same ? '우리 팀이 먼저 눌렀어요!' : '상대 팀이 먼저 눌렀어요'}</p></div>`;
+      }
+      if (v.excluded) return '<div class="stage"><div class="result-big" style="text-align:center">⏸ 이번엔 상대 팀 차례예요</div></div>';
+      return `<button id="bz" class="buzz-btn" style="background:${TEAMC[t]}">🔔<br>정답!</button>
+        <p class="sub" style="margin:0;text-align:center;color:var(--muted)">답을 알면 누르고 외치세요. 먼저 누른 팀에게 기회!</p>`;
+    }
+
+    // 💣 폭탄: 받은 사람만 넘길 사람 목록이 보임
+    function bombHtml() {
+      if (v.boom) {
+        if (v.boom.me) buzz([400, 100, 400]);
+        return `<div class="stage"><div class="boom pop">💥 펑!</div><div class="result-big" style="text-align:center">${v.boom.me ? '내가 당첨! 😱' : `${esc(v.boom.name)} 님 당첨!`}</div></div>`;
+      }
+      if (!v.live) return `<div class="stage"><div class="bomb">💣</div><div class="category">${esc(v.cat)}</div><p class="notice" style="margin:0;text-align:center">곧 폭탄이 출발해요!</p></div>`;
+      if (v.holding) {
+        if (!prevHolding) buzz([200, 80, 200]);
+        prevHolding = true;
+        const list = v.others.slice().sort((a, b) => b.online - a.online);
+        return `<div class="stage" style="background:rgba(255,70,40,.25);border-radius:16px;gap:8px">
+            <div class="bomb shake">💣</div>
+            <div class="category">${esc(v.cat)}</div>
+            <p class="notice" style="margin:0;text-align:center">단어를 외치고 → 넘길 사람을 누르세요!</p>
+            <div class="ngrid">${list.map((o) => `<button class="nbtn" data-pass="${o.id}" style="border-color:${TEAMC[o.team]}">${o.online ? '' : '💤 '}${esc(o.name)}</button>`).join('')}</div>
+          </div>`;
+      }
+      prevHolding = false;
+      return `<div class="stage"><div class="bomb">💣</div><div class="category">${esc(v.cat)}</div>
+        <p class="notice" style="margin:0;text-align:center">지금 폭탄: <b>${esc(v.holderName)}</b></p>
+        <p class="sub" style="margin:0;text-align:center;color:var(--muted)">폭탄이 오면 이 화면이 빨갛게 바뀌어요</p></div>`;
+    }
+
+    // 🎨 캐치마인드
+    let pad = null;
+    function drawHtml() {
+      if (v.done) return `<div class="stage"><p class="notice" style="margin:0">정답</p><div class="answer pop">${esc(v.word)}</div></div>`;
+      if (!v.drawing) return `<div class="stage"><div class="bomb">🎨</div><p class="notice" style="margin:0;text-align:center">${esc(v.teamNames[v.team])}가 그리는 중!<br>TV를 보고 맞혀 보세요</p></div>`;
+      if (!v.isDrawer) return `<div class="stage"><p class="sub" style="margin:0">제시어</p><div class="word">${esc(v.word)}</div>
+        <p class="notice" style="margin:0;text-align:center">✏️ 지금은 <b>${esc(v.drawerName)}</b> 차례</p>
+        <p class="sub" style="margin:0;text-align:center;color:var(--muted)">내 차례가 되면 이 화면에 그림판이 나와요</p></div>`;
+      return `<div class="row" style="justify-content:space-between"><span class="pill">제시어 <b id="dw">${esc(v.word)}</b></span><span class="pill" id="dt">✏️ 내 차례!</span></div>
+        <div class="canvas-box" id="pbox" style="flex:0 0 auto;aspect-ratio:4/3"><canvas id="pc"></canvas></div>
+        <div class="row" id="sw">${['#111', '#e53935', '#1e88e5', '#43a047', '#fdd835', '#ffffff'].map((c, i) => `<button class="swatch ${i ? '' : 'on'}" style="background:${c}" data-c="${c}"></button>`).join('')}</div>
+        <div class="row"><button class="btn" id="thin">가늘게</button><button class="btn on" id="thick">굵게</button><button class="btn" id="clr">🧽 전체 지우기</button></div>
+        <p class="sub" style="margin:0;text-align:center;color:var(--muted)">글자·숫자는 쓰면 안 돼요! (흰색 = 지우개)</p>`;
+    }
+    function updateDrawInfo() { const d = document.getElementById('dw'); if (d) d.textContent = v.word; }
+    function updateAllin() {
+      const el = document.getElementById('mine'), m = v.mine;
+      if (el) el.innerHTML = m ? `현재 우리 팀 답: <b>“${esc(m.text)}”</b> (${esc(m.by)})` : '아직 제출 전이에요';
+    }
+    function setupPad() {
+      const box = document.getElementById('pbox'), cv = document.getElementById('pc'), ctx = cv.getContext('2d');
+      const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      cv.width = r.width * dpr; cv.height = r.height * dpr; ctx.scale(dpr, dpr);
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, r.width, r.height); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      pad = { turn: v.turn };
+      // 릴레이: 앞사람이 그린 그림을 이어서 그릴 수 있게 받아 와서 깔아 둠
+      fetch('/api/p/strokes?pt=' + encodeURIComponent(me.pt), { cache: 'no-store' }).then((x) => (x.ok ? x.json() : null)).then((j) => {
+        if (!j || !Array.isArray(j.strokes)) return;
+        const last = {};
+        j.strokes.forEach((ch) => {
+          ctx.strokeStyle = ch.c; ctx.lineWidth = ch.w * r.width / 400; ctx.beginPath();
+          let [x, y] = ch.first || !last[ch.id] ? [ch.p[0][0] * r.width, ch.p[0][1] * r.height] : last[ch.id];
+          ctx.moveTo(x, y); if (ch.first) ctx.lineTo(x + 0.1, y + 0.1);
+          ch.p.forEach((q) => { x = q[0] * r.width; y = q[1] * r.height; ctx.lineTo(x, y); });
+          ctx.stroke(); last[ch.id] = [x, y];
+        });
+      }).catch(() => null);
+      let color = '#111', width = 6, cur = null, buf = [], first = false, timer = null, n = 0;
+      // 화면 크기가 달라도 같게 보이도록 0~1 좌표로 보냄 (굵기는 가로 400 기준)
+      const flush = () => {
+        timer = null;
+        if (!cur || !buf.length) return;
+        post('stroke', { pt: me.pt, s: { id: cur, c: color, w: width, first, p: buf } }).catch(() => null);
+        buf = []; first = false;
+      };
+      const pos = (e) => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) / b.width, (e.clientY - b.top) / b.height]; };
+      cv.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); cv.setPointerCapture(e.pointerId);
+        cur = 's' + Date.now().toString(36) + (n++); first = true;
+        const [x, y] = pos(e); buf = [[x, y]];
+        ctx.strokeStyle = color; ctx.lineWidth = width * r.width / 400;
+        ctx.beginPath(); ctx.moveTo(x * r.width, y * r.height); ctx.lineTo(x * r.width + 0.1, y * r.height + 0.1); ctx.stroke();
+        flush();
+      });
+      cv.addEventListener('pointermove', (e) => {
+        if (!cur) return;
+        const [x, y] = pos(e); ctx.lineTo(x * r.width, y * r.height); ctx.stroke();
+        buf.push([x, y]); if (!timer) timer = setTimeout(flush, 40);
+      });
+      const up = () => { if (!cur) return; clearTimeout(timer); flush(); cur = null; };
+      cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+      document.getElementById('sw').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-c]'); if (!b) return;
+        color = b.dataset.c; document.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('on', s === b));
+      });
+      const thin = document.getElementById('thin'), thick = document.getElementById('thick');
+      thin.onclick = () => { width = 3; thin.classList.add('on'); thick.classList.remove('on'); };
+      thick.onclick = () => { width = 6; thick.classList.add('on'); thin.classList.remove('on'); };
+      document.getElementById('clr').onclick = () => {
+        if (!confirm('그림을 모두 지울까요?')) return;
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, r.width, r.height);
+        post('clear', { pt: me.pt }).catch(() => null);
+      };
+      buzz([150, 60, 150]);
+    }
+
+    // 🔥 올인: 팀원 누구나 제출, 마지막 제출이 팀 답
+    function allinHtml() {
+      const mine = v.mine;
+      if (!v.open) return `<div class="stage"><p class="notice" style="margin:0">⏰ 제출 마감!</p>
+        <div class="answer">${mine ? `“${esc(mine.text)}”<small>${esc(mine.by)} 제출</small>` : '<small>우리 팀은 답을 내지 않았어요</small>'}</div>
+        <p class="sub" style="margin:0;color:var(--muted)">TV에서 정답을 확인하세요</p></div>`;
+      return `<div class="stage" style="gap:10px">
+          <p class="notice" style="margin:0;text-align:center">🔥 우리 팀 답을 적어 주세요<br><small style="color:var(--muted)">팀원 누구나 고칠 수 있어요. 마지막 제출이 팀 답!</small></p>
+          <input id="ans" class="names" style="min-height:0;flex:0;font-size:22px" maxlength="60" placeholder="정답" autocomplete="off">
+          <button class="btn big primary" id="send">📨 제출</button>
+          <div class="pill" id="mine" style="text-align:center">${mine ? `현재 우리 팀 답: <b>“${esc(mine.text)}”</b> (${esc(mine.by)})` : '아직 제출 전이에요'}</div>
+        </div>`;
+    }
+
+    function bind() {
+      const bz = document.getElementById('bz');
+      if (bz) bz.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); bz.disabled = true; buzz(60);
+        post('buzz', { pt: me.pt }).catch(() => { bz.disabled = false; });
+      });
+      main.querySelectorAll('[data-pass]').forEach((b) => b.addEventListener('click', () => {
+        main.querySelectorAll('[data-pass]').forEach((x) => { x.disabled = true; });
+        post('pass', { pt: me.pt, to: Number(b.dataset.pass) }).catch(() => null);
+      }));
+      if (document.getElementById('pc')) setupPad();
+      const send = document.getElementById('send');
+      if (send) {
+        const inp = document.getElementById('ans');
+        const go = () => {
+          const text = inp.value.trim(); if (!text) return;
+          send.disabled = true;
+          post('answer', { pt: me.pt, text }).then((r) => { if (!r.ok) alert('제출이 마감됐어요'); }).catch(() => alert('전송하지 못했어요. 다시 눌러 주세요.')).finally(() => { send.disabled = false; });
+          inp.value = '';
+        };
+        send.onclick = go;
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+      }
+    }
+
+    me ? connect() : lobby();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && me && (!es || es.readyState === 2)) connect(); });
+  </script>
+</body>
+</html>
