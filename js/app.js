@@ -188,6 +188,7 @@ const GAMES = [
   { key: 'bomb', ic: '💣', t: '폭탄 돌리기', d: '터지면 벌칙!' },
   { key: 'allin', ic: '🔥', t: '올인 역전', d: '마지막 대역전' },
   { key: 'mafia', ic: '🕵️', t: '마피아', d: '사회자 진행' },
+  { key: 'liar', ic: '🤥', t: '라이어 게임', d: '거짓말쟁이를 찾아라' },
   { key: 'roulette', ic: '🎰', t: '벌칙 룰렛', d: '운명의 룰렛' },
 ];
 
@@ -1253,6 +1254,225 @@ screens.mafia = () => {
       again: () => { M = { ...M, g: { ...M.g, c: newCode() }, alive: M.g.n.map(() => true), day: 1, over: null }; persist(); join(); },
       setup: () => setup(),
     };
+  }
+
+  setup();
+};
+
+// ── 🤥 라이어 게임 ──
+// 제시어·라이어는 TV에 띄우지 않고 각자 폰(player.html)에서 확인합니다. 라운드 번호로 진행 폰과 맞춥니다.
+screens.liar = () => {
+  if (S.tts === undefined) S.tts = true;
+  const parseNames = (txt) => [...new Set(txt.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))];
+  const newCode = () => String(1000 + Math.random() * 9000 | 0);
+  const fmt = (s) => `${s / 60 | 0}:${String(s % 60).padStart(2, '0')}`;
+  const say = (t) => {
+    if (!S.tts || !window.speechSynthesis) return;
+    try { const u = new SpeechSynthesisUtterance(t); u.lang = 'ko-KR'; u.rate = 0.95; speechSynthesis.speak(u); } catch (e) { /* 미지원 */ }
+  };
+  const hush = () => { try { speechSynthesis.cancel(); } catch (e) { /* 미지원 */ } };
+  onCleanup(hush);
+
+  let L = S.liar || null, stopTimer = null;
+  const persist = () => { S.liar = L; save(); };
+  const stopT = () => { if (stopTimer) { stopTimer(); stopTimer = null; } };
+  onCleanup(stopT);
+  const score = () => { const w = (L.log || []).filter((x) => x === 'liar').length; return `시민 ${(L.log || []).length - w}승 · 라이어 ${w}승`; };
+
+  // ── 준비 ──
+  function setup() {
+    stopT();
+    let txt = ((L && L.g.n) || S.players || []).join('\n');
+    let k = L ? L.g.k : 1, mode = L ? L.g.mode : 'normal', cat = L ? L.g.cat : '';
+    function draw() {
+      const n = parseNames(txt).length;
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>🤥 라이어 게임 · 준비</h2><span class="sub">사회자는 명단에서 빼 주세요</span></div>
+          <div class="stage-wrap">
+            <div class="stage" style="align-items:stretch;gap:8px">
+              <textarea id="names" class="names" placeholder="참가자 이름 (한 줄에 한 명)">${esc(txt)}</textarea>
+              <div class="chips">${['', ...Object.keys(LIAR_WORDS)].map((c) => `<button class="chip ${c === cat ? 'on' : ''}" data-a="cat" data-v="${esc(c)}">${c || '🎲 라운드마다 랜덤'}</button>`).join('')}</div>
+            </div>
+            <div class="controls">
+              <div class="pill" id="sum" style="text-align:center">${n}명 · 라이어 ${k}명</div>
+              <div class="row"><button class="btn ${k === 1 ? 'on' : ''}" data-a="k" data-v="1">라이어 1명</button><button class="btn ${k === 2 ? 'on' : ''}" data-a="k" data-v="2">라이어 2명</button></div>
+              <div class="row"><button class="btn ${mode === 'normal' ? 'on' : ''}" data-a="mode" data-v="normal">일반 모드</button><button class="btn ${mode === 'fool' ? 'on' : ''}" data-a="mode" data-v="fool">바보 모드</button></div>
+              <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${mode === 'fool' ? '바보 모드: 라이어는 다른 제시어를 받고, 자기가 라이어인 줄 모릅니다' : '일반 모드: 라이어는 카테고리만 알고 제시어를 모릅니다'}</p>
+              <button class="btn ${S.tts ? 'on' : ''}" data-a="tts">🔊 음성 ${S.tts ? 'ON' : 'OFF'}</button>
+              ${L && L.phase !== 'over' ? `<button class="btn gold" data-a="resume">▶ 이어서 하기 (라운드 ${L.r})</button>` : ''}
+              <button class="btn big primary" data-a="create">🎲 게임 만들기</button>
+            </div>
+          </div>
+        </div>`;
+      $('#names').addEventListener('input', (e) => { txt = e.target.value; $('#sum').textContent = `${parseNames(txt).length}명 · 라이어 ${k}명`; });
+    }
+    actions = {
+      k: (v) => { k = Number(v); draw(); },
+      mode: (v) => { mode = v; draw(); },
+      cat: (v) => { cat = v; draw(); },
+      tts: () => { S.tts = !S.tts; save(); draw(); if (S.tts) say('음성 안내를 켰습니다.'); },
+      resume: () => (L.phase === 'join' ? join() : round()),
+      create: () => {
+        const names = parseNames(txt);
+        if (names.length < 3) { toast('3명 이상 입력해 주세요'); return; }
+        if (k === 2 && names.length < 6) { toast('라이어 2명은 6명 이상일 때 가능해요'); return; }
+        L = { g: { t: 'liar', c: newCode(), n: names, k, mode, cat }, r: 1, log: [], phase: 'join' };
+        S.players = names; persist(); sfx.ok(); join();
+      },
+    };
+    draw();
+  }
+
+  // ── 접속 (QR) ──
+  function join() {
+    stopT(); L.phase = 'join'; persist();
+    const url = new URL('player.html?g=' + encodeGame(L.g), location.href).href;
+    let qr = '';
+    try { const q = qrcode(0, 'M'); q.addData(url); q.make(); qr = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); } catch (e) { qr = ''; }
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🤥 접속하기</h2><span class="pill">게임 코드 ${L.g.c}</span></div>
+        <div class="stage-wrap">
+          <div class="stage">${qr ? `<div class="qr">${qr}</div>` : `<div class="sub" style="word-break:break-all">${esc(url)}</div>`}</div>
+          <div class="controls">
+            <p class="notice" style="margin:0;text-align:center">📱 각자 폰으로 QR을 찍고<br>자기 이름을 누르세요</p>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">한 번만 접속하면 돼요. 라운드가 바뀌면<br>폰에서 [다음 ▶]만 누르면 됩니다.</p>
+            <button class="btn" data-a="copy">🔗 링크 복사 (단톡방 공유)</button>
+            <button class="btn big primary" data-a="start">▶ 라운드 ${L.r} 시작</button>
+            <button class="btn" data-a="back">✏️ 준비 화면으로</button>
+          </div>
+        </div>
+      </div>`;
+    actions = {
+      copy: async () => {
+        try { await navigator.clipboard.writeText(url); toast('링크를 복사했어요. 단톡방에 붙여 넣으세요'); }
+        catch (e) { prompt('아래 링크를 복사하세요', url); }
+      },
+      start: () => round(),
+      back: () => setup(),
+    };
+  }
+
+  // ── 라운드: 설명 → 토론 ──
+  function round() {
+    stopT(); hush(); L.phase = 'round'; persist();
+    const R = liarRound(L.g, L.r), n = L.g.n.length;
+    const order = Array.from({ length: n }, (_, i) => (R.first + i) % n);
+    let left = 120;
+    say(`라운드 ${L.r}. 카테고리는 ${R.cat}입니다. 폰에서 라운드 번호를 확인하고 제시어를 확인해 주세요. ${L.g.n[R.first]} 님부터 시계 방향으로 한 마디씩 설명해 주세요.`);
+    const tick = (s) => { left = s; const t = $('#tm'); if (t) { t.textContent = fmt(s); t.classList.toggle('warn', s <= 10); } if (s <= 5 && s > 0) sfx.tick(); };
+    const run = () => { stopT(); stopTimer = countdown(left, tick, () => { stopTimer = null; sfx.boom(); say('토론 시간이 끝났습니다. 투표를 시작합니다.'); }); };
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🤥 라운드 ${L.r}</h2><span class="pill">${score()}</span></div>
+        <div class="stage-wrap">
+          <div class="stage" style="gap:6px;overflow:auto;justify-content:safe center">
+            <div class="row"><span class="pill">카테고리</span><span class="category pop" style="font-size:clamp(24px,6vmin,48px)">${esc(R.cat)}</span><span class="timer" id="tm" style="font-size:clamp(22px,6vmin,48px)">${fmt(left)}</span></div>
+            <p class="notice" style="margin:0">📱 폰에서 라운드 ${L.r} 확인 → 카드를 꾹 눌러 제시어 확인</p>
+            <div class="ngrid">${order.map((k, i) => `<div class="nbtn">${esc(L.g.n[k])}<small>${i + 1}번째</small></div>`).join('')}</div>
+          </div>
+          <div class="controls">
+            <div class="row"><button class="btn primary" data-a="talk">▶ 토론 2분</button><button class="btn" data-a="plus">+30초</button></div>
+            <button class="btn big gold" data-a="vote">🗳 투표하기</button>
+            <button class="btn" data-a="skip">⏭ 이 라운드 건너뛰기</button>
+            <button class="btn" data-a="quit">🏁 게임 끝내기</button>
+          </div>
+        </div>
+      </div>`;
+    actions = {
+      talk: () => { say('자유 토론을 시작합니다.'); run(); },
+      plus: () => { left += 30; tick(left); if (stopTimer) run(); },
+      vote: () => vote(R),
+      skip: () => { if (confirm('이 라운드를 건너뛸까요? (결과 기록 없이 다음 라운드로)')) nextRound(); },
+      quit: () => { if (confirm('라이어 게임을 끝낼까요?')) { L.phase = 'over'; persist(); go('home'); } },
+    };
+  }
+
+  // ── 투표 ──
+  function vote(R) {
+    stopT(); hush();
+    let sel = null;
+    say('셋, 둘, 하나에 맞춰 라이어라고 생각하는 사람을 동시에 가리켜 주세요. 셋. 둘. 하나. 지목!');
+    function draw() {
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>🗳 라이어는 누구?</h2><span class="sub">가장 많이 지목된 사람을 누르세요</span></div>
+          <div class="stage-wrap">
+            <div class="stage">
+              <div class="ngrid">${L.g.n.map((nm, k) => `<button class="nbtn ${sel === k ? 'on' : ''}" data-a="sel" data-v="${k}">${esc(nm)}</button>`).join('')}</div>
+            </div>
+            <div class="controls">
+              <button class="btn big bad" data-a="ok" ${sel === null ? 'disabled' : ''}>👉 지목 확정</button>
+              <button class="btn" data-a="back">↩ 토론으로</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    actions = {
+      sel: (v) => { sel = Number(v); sfx.tick(); draw(); },
+      ok: () => verdict(R, sel),
+      back: () => round(),
+    };
+    draw();
+  }
+
+  // ── 판정 ──
+  function verdict(R, sel) {
+    hush();
+    const caught = R.liars.includes(sel), nm = L.g.n[sel];
+    if (!caught) return result(R, true, `${nm} 님은 라이어가 아니었습니다!`);
+    sfx.ok(); flash('var(--gold)');
+    if (L.g.mode === 'fool') return result(R, false, `${nm} 님이 라이어였습니다!`);
+    say(`${nm} 님, 라이어가 맞습니다! 하지만 아직 끝나지 않았습니다. 라이어는 제시어를 맞혀 주세요. 맞히면 라이어의 승리입니다.`);
+    main.innerHTML = `
+      <div class="screen">
+        <div class="stage">
+          <div class="result-big pop">🎯 ${esc(nm)} 님이 라이어!</div>
+          <p class="notice" style="margin:0">마지막 기회! 라이어가 제시어를 말해 보세요</p>
+          <div class="pill">카테고리: ${esc(R.cat)}</div>
+          <div class="row">
+            <button class="btn big bad" data-a="hit">😱 맞혔다 (라이어 승)</button>
+            <button class="btn big ok" data-a="miss">🙅 틀렸다 (시민 승)</button>
+          </div>
+        </div>
+      </div>`;
+    actions = {
+      hit: () => result(R, true, `${nm} 님이 제시어를 맞혔습니다!`),
+      miss: () => result(R, false, `${nm} 님이 제시어를 맞히지 못했습니다!`),
+    };
+  }
+
+  function result(R, liarWin, msg) {
+    L.log = [...(L.log || []), liarWin ? 'liar' : 'citizen']; persist();
+    const liarNames = R.liars.map((k) => L.g.n[k]).join(', ');
+    say(`${msg} ${liarWin ? '라이어의 승리입니다!' : '시민의 승리입니다!'} 제시어는 ${R.word}, 라이어는 ${liarNames} 님이었습니다.`);
+    liarWin ? sfx.boom() : sfx.fanfare();
+    flash(liarWin ? 'var(--bad)' : 'var(--ok)');
+    main.innerHTML = `
+      <div class="screen">
+        <div class="stage">
+          <div class="sub" style="color:var(--muted)">${esc(msg)}</div>
+          <div class="result-big pop">${liarWin ? '🤥 라이어 승리!' : '🎉 시민 승리!'}</div>
+          <div class="row">
+            <div class="pill">제시어: <b>${esc(R.word)}</b></div>
+            ${L.g.mode === 'fool' ? `<div class="pill">라이어의 제시어: <b>${esc(R.fake)}</b></div>` : ''}
+            <div class="pill">라이어: <b>${esc(liarNames)}</b></div>
+          </div>
+          <div class="pill">${score()}</div>
+          <div class="row">
+            <button class="btn big primary" data-a="next">▶ 다음 라운드</button>
+            <button class="btn gold" data-a="roulette">🎰 벌칙 룰렛</button>
+          </div>
+        </div>
+      </div>`;
+    actions = { next: () => nextRound(), roulette: () => go('roulette') };
+  }
+
+  function nextRound() {
+    L.r++; persist();
+    say(`라운드 ${L.r}입니다. 모두 폰에서 다음 버튼을 눌러 라운드 ${L.r}로 넘어가 주세요.`);
+    round();
   }
 
   setup();

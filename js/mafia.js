@@ -15,6 +15,21 @@ function mafiaRoles(g) {
   return r;
 }
 
+// 라이어 게임: g = { t: 'liar', c, n, k: 라이어 수, mode: 'normal' | 'fool', cat: 카테고리 또는 '' (라운드마다 랜덤) }
+// 라운드 번호만 같으면 진행 폰과 참가자 폰이 같은 제시어·라이어를 계산합니다.
+function liarRound(g, r) {
+  const cats = Object.keys(LIAR_WORDS);
+  // 랜덤 카테고리는 섞인 순서대로 돌아가며 나와서 연속으로 겹치지 않음
+  const cat = g.cat && LIAR_WORDS[g.cat] ? g.cat : cats[seededOrder(cats.length, 'liar-cat', g.c)[(r - 1) % cats.length]];
+  // 같은 카테고리 안에서도 제시어가 반복되지 않도록 카테고리별 섞인 순서에서 차례로 꺼냄
+  const words = LIAR_WORDS[cat], uses = g.cat ? r - 1 : Math.floor((r - 1) / cats.length);
+  const wo = seededOrder(words.length, 'liar-word:' + cat, g.c), base = (uses * 2) % words.length;
+  const pickW = (i) => words[wo[(base + i) % words.length]];
+  const liars = seededOrder(g.n.length, 'liar:' + r, g.c).slice(0, g.k);
+  const first = seededOrder(g.n.length, 'liar-first:' + r, g.c)[0];
+  return { cat, word: pickW(0), fake: pickW(1), liars, first };
+}
+
 function encodeGame(g) {
   return btoa(unescape(encodeURIComponent(JSON.stringify(g)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

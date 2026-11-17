@@ -8,14 +8,14 @@
   <title>마피아 역할 확인</title>
   <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=11">
+  <link rel="stylesheet" href="css/style.css?v=14">
 </head>
 <body>
   <main id="main"></main>
 
-  <script src="js/data.js?v=11"></script>
-  <script src="js/order.js?v=11"></script>
-  <script src="js/mafia.js?v=11"></script>
+  <script src="js/data.js?v=14"></script>
+  <script src="js/order.js?v=14"></script>
+  <script src="js/mafia.js?v=14"></script>
   <script>
     'use strict';
     const main = document.getElementById('main');
@@ -29,8 +29,12 @@
         <div class="result-big">😵 링크가 올바르지 않아요</div>
         <p class="sub" style="color:var(--muted)">TV 화면의 QR 코드를 다시 찍거나, 단톡방 링크를 다시 눌러 주세요.</p></div>`;
     } else {
-      const roles = mafiaRoles(g);
-      const KEY = 'mafia-me-' + g.c;
+      const isLiar = g.t === 'liar';
+      const roles = isLiar ? [] : mafiaRoles(g);
+      const KEY = 'mafia-me-' + g.c, RKEY = 'liar-round-' + g.c;
+      const title = isLiar ? '🤥 라이어 게임' : '🕵️ 마피아 게임';
+      document.title = isLiar ? '라이어 게임 제시어' : '마피아 역할 확인';
+      const showRole = () => (isLiar ? showLiar() : showMafia());
       let me = null;
       try { const v = localStorage.getItem(KEY); if (v !== null) me = Number(v); } catch (e) { /* 저장 불가 */ }
       if (!(me >= 0 && me < g.n.length)) me = null;
@@ -39,7 +43,7 @@
       function pickName() {
         main.innerHTML = `
           <div class="screen">
-            <div class="head"><h2>🕵️ 마피아 게임</h2><span class="pill">코드 ${esc(g.c)}</span></div>
+            <div class="head"><h2>${title}</h2><span class="pill">코드 ${esc(g.c)}</span></div>
             <p class="notice" style="margin:0">본인 이름을 눌러 주세요</p>
             <p class="sub" style="margin:0;color:var(--muted)">다른 사람 이름을 누르면 반칙이에요 🙅</p>
             <div class="ngrid" style="justify-content:flex-start">
@@ -55,7 +59,56 @@
         }));
       }
 
-      function showRole() {
+      // 꾹 누르는 동안만 카드 내용 보이기
+      function holdToReveal() {
+        const card = document.getElementById('card');
+        const on = (e) => { e.preventDefault(); card.classList.add('show'); };
+        const off = () => card.classList.remove('show');
+        card.addEventListener('pointerdown', on);
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => card.addEventListener(ev, off));
+        card.addEventListener('contextmenu', (e) => e.preventDefault());
+        document.getElementById('re').addEventListener('click', () => {
+          if (!confirm('이름을 다시 고를까요?')) return;
+          try { localStorage.removeItem(KEY); } catch (e) { /* 저장 불가 */ }
+          me = null; pickName();
+        });
+      }
+
+      function showLiar() {
+        let r = 1;
+        try { r = Math.max(1, Number(localStorage.getItem(RKEY)) || 1); } catch (e) { /* 저장 불가 */ }
+        const draw = () => {
+          const R = liarRound(g, r), liar = R.liars.includes(me);
+          const inner = liar && g.mode !== 'fool'
+            ? `<div class="role-ic">🤥</div><div class="result-big">당신은 라이어!</div>
+               <p class="role-d">제시어를 모릅니다. 다른 사람들의 설명을 잘 듣고 들키지 않게 설명하세요.</p>`
+            : `<div class="role-d" style="margin:0 0 6px">제시어</div><div class="result-big" style="font-size:44px">${esc(liar ? R.fake : R.word)}</div>
+               <p class="role-d">라이어가 눈치채지 못하게, 너무 뻔하지 않게 설명하세요.</p>`;
+          main.innerHTML = `
+            <div class="screen">
+              <div class="head"><h2>${esc(g.n[me])} 님</h2><span class="pill">코드 ${esc(g.c)}</span></div>
+              <div class="row" style="flex-wrap:nowrap">
+                <button class="btn" id="prev" ${r <= 1 ? 'disabled' : ''}>◀</button>
+                <div class="result-big" style="flex:1;text-align:center">라운드 ${r}</div>
+                <button class="btn primary" id="next">다음 ▶</button>
+              </div>
+              <p class="sub" style="margin:0;text-align:center;color:var(--muted)">TV에 나온 라운드 번호와 같은지 확인하세요</p>
+              <div class="pill" style="text-align:center;font-size:18px">카테고리: ${esc(R.cat)}</div>
+              <div class="role-card" id="card">
+                <div class="cover">👆<br>꾹 누르고 있는 동안만<br>제시어가 보여요</div>
+                <div class="inner">${inner}</div>
+              </div>
+              <button class="btn" id="re">이름을 잘못 골랐어요</button>
+            </div>`;
+          const setR = (v) => { r = v; try { localStorage.setItem(RKEY, String(r)); } catch (e) { /* 저장 불가 */ } draw(); };
+          document.getElementById('prev').addEventListener('click', () => setR(r - 1));
+          document.getElementById('next').addEventListener('click', () => setR(r + 1));
+          holdToReveal();
+        };
+        draw();
+      }
+
+      function showMafia() {
         const r = roles[me], info = ROLES[r];
         const mates = r === 'mafia' ? g.n.filter((_, k) => k !== me && roles[k] === 'mafia') : [];
         main.innerHTML = `
@@ -73,17 +126,7 @@
             <p class="sub" style="margin:0;text-align:center;color:var(--muted)">주변 사람에게 화면이 보이지 않게 조심하세요.</p>
             <button class="btn" id="re">이름을 잘못 골랐어요</button>
           </div>`;
-        const card = document.getElementById('card');
-        const on = (e) => { e.preventDefault(); card.classList.add('show'); };
-        const off = () => card.classList.remove('show');
-        card.addEventListener('pointerdown', on);
-        ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => card.addEventListener(ev, off));
-        card.addEventListener('contextmenu', (e) => e.preventDefault());
-        document.getElementById('re').addEventListener('click', () => {
-          if (!confirm('이름을 다시 고를까요?')) return;
-          try { localStorage.removeItem(KEY); } catch (e) { /* 저장 불가 */ }
-          me = null; pickName();
-        });
+        holdToReveal();
       }
     }
   </script>
