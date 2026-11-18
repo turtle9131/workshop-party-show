@@ -61,17 +61,100 @@ function renderScore() {
       <span class="pts" id="pts${i}">${S.teams[i].score}</span>
       <span class="pm"><button data-s="${i}:-1">−</button><button data-s="${i}:1">＋</button></span>
     </div>`;
-  $('#scorebar').innerHTML = t(0, 'A') + '<button class="home-btn" data-home title="홈">🏠</button>' + t(1, 'B');
+  $('#scorebar').innerHTML = t(0, 'A') + '<span class="mid"><button class="home-btn" data-home title="홈">🏠</button><button class="home-btn" data-scores title="점수판 · 개인 점수">🏅</button></span>' + t(1, 'B');
 }
-function addScore(i, n) {
+// ask = false 면 "누가 맞혔나요?"를 묻지 않음 (점수판 화면의 팀 점수 수정 등)
+function addScore(i, n, ask = true) {
   S.teams[i].score += n; save(); renderScore();
   const el = $('#pts' + i); el.classList.add('bump'); setTimeout(() => el.classList.remove('bump'), 250);
+  if (n > 0 && ask) askWho(i, n);
+  pushScores();
 }
 $('#scorebar').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.hasAttribute('data-home')) return go('home');
+  if (b.hasAttribute('data-scores')) return go('scores');
   const [i, n] = b.dataset.s.split(':').map(Number); addScore(i, n); n > 0 ? sfx.ok() : sfx.bad();
 });
+
+// ═══════════════════════ 개인 점수 ═══════════════════════
+// S.indiv = { 이름: { t: 팀, p: 포인트 } }. 팀 점수를 줄 때 "누가 맞혔나요?"로 개인 포인트도 줍니다.
+if (!S.indiv || typeof S.indiv !== 'object') S.indiv = {};
+if (S.askWho === undefined) S.askWho = true;
+if (!S.scoreShow) S.scoreShow = 'all'; // 참가자 폰 공개 범위: all(팀+개인) | team(팀만) | off(숨김)
+
+// 팀원 = 팀 나누기 명단 + 폰으로 접속한 사람 + 이미 포인트를 받은 사람
+function teamMembers(t) {
+  const R = Array.isArray(S.roster) && S.roster.length === 2 ? S.roster : [[], []];
+  const inR = (n) => R[0].includes(n) || R[1].includes(n); // 명단에 있으면 명단의 팀이 우선
+  const set = new Set(R[t]);
+  if (typeof Party !== 'undefined') Party.members(t).forEach((m) => { if (!inR(m.name)) set.add(m.name); });
+  Object.entries(S.indiv).forEach(([n, x]) => { if (x.t === t && !inR(n)) set.add(n); });
+  return [...set];
+}
+function allPlayers() { return [0, 1].flatMap((t) => teamMembers(t).map((n) => ({ n, t, p: (S.indiv[n] && S.indiv[n].p) || 0 }))); }
+function addIndiv(name, t, n) {
+  const x = S.indiv[name] || (S.indiv[name] = { t, p: 0 });
+  x.t = t; x.p = Math.max(0, x.p + n);
+  save(); pushScores();
+}
+// 동점은 같은 등수 (1, 1, 3 …)
+function ranked() {
+  const list = allPlayers().sort((a, b) => b.p - a.p || a.n.localeCompare(b.n, 'ko'));
+  let r = 0, prev = null;
+  return list.map((x, i) => { if (x.p !== prev) { r = i + 1; prev = x.p; } return { ...x, r }; });
+}
+
+// "누가 맞혔나요?" 창: 팀 점수가 오를 때 아래에 뜸. 여러 번 오르면 차례로 물음
+const whoQ = [];
+function askWho(t, n) {
+  if (!S.askWho || !teamMembers(t).length) return;
+  whoQ.push({ t, n });
+  if (whoQ.length === 1) showWho();
+  else showWho(true);
+}
+function showWho(onlyCount) {
+  let el = $('#whosheet');
+  const q = whoQ[0];
+  if (!q) { if (el) el.remove(); return; }
+  if (onlyCount && el) { const c = el.querySelector('.wq'); if (c) { c.textContent = `다음 ${whoQ.length - 1}건`; c.style.display = ''; } return; }
+  if (!el) { el = document.createElement('div'); el.id = 'whosheet'; document.body.appendChild(el); }
+  const step = S.indivStep || 1;
+  // 폰 버저를 누른 사람이 있으면 맨 앞에 🔔로 표시
+  const lb = typeof Party !== 'undefined' && Party.lastBuzz && Party.lastBuzz.team === q.t && Date.now() - Party.lastBuzz.at < 180000 ? Party.lastBuzz.name : null;
+  const mem = teamMembers(q.t);
+  if (lb && mem.includes(lb)) { mem.splice(mem.indexOf(lb), 1); mem.unshift(lb); }
+  el.className = 'whosheet ' + (q.t ? 'B' : 'A');
+  el.innerHTML = `
+    <div class="wtitle">🏅 ${esc(S.teams[q.t].name)} +${q.n} · <b>누가 맞혔나요?</b> <small>개인 포인트</small> <span class="pill wq" ${whoQ.length > 1 ? '' : 'style="display:none"'}>다음 ${whoQ.length - 1}건</span></div>
+    <div class="ngrid">${mem.map((nm) => `<button class="nbtn${nm === lb ? ' cur' : ''}" data-w="${esc(nm)}">${nm === lb ? '🔔 ' : ''}${S.leaders && S.leaders.includes(nm) ? '👑' : ''}${esc(nm)}<small>${(S.indiv[nm] && S.indiv[nm].p) || 0}점</small></button>`).join('')}</div>
+    <div class="row">${[1, 2, 3].map((k) => `<button class="chip ${step === k ? 'on' : ''}" data-step="${k}">+${k}점</button>`).join('')}
+      <button class="btn" data-all>👥 팀 전원 +${step}</button><button class="btn" data-skip>건너뛰기</button></div>`;
+  el.onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.step) { S.indivStep = Number(b.dataset.step); save(); return showWho(); }
+    if (b.dataset.w !== undefined) { addIndiv(b.dataset.w, q.t, step); sfx.ok(); toast(`🏅 ${b.dataset.w} +${step}점`); }
+    else if (b.hasAttribute('data-all')) { teamMembers(q.t).forEach((nm) => addIndiv(nm, q.t, step)); sfx.ok(); toast(`🏅 ${S.teams[q.t].name} 전원 +${step}점`); }
+    whoQ.shift(); showWho();
+  };
+}
+
+// 참가자 폰으로 점수 보내기 (노트북 서버 + 📱 폰 연결이 열려 있을 때만)
+let pushT = null;
+function scorePayload() {
+  return {
+    mode: S.scoreShow, leaders: S.leaders || null,
+    teams: S.teams.map((t) => ({ name: t.name, score: t.score })),
+    indiv: allPlayers().map((x) => ({ name: x.n, team: x.t, pts: x.p })),
+  };
+}
+function pushScores() {
+  clearTimeout(pushT);
+  pushT = setTimeout(() => {
+    if (typeof Party === 'undefined' || !S.partyHt || !NET.info) return;
+    Party.act('score', { scores: scorePayload() });
+  }, 250);
+}
 
 // ═══════════════════════ 화면 전환 ═══════════════════════
 let actions = {};
@@ -208,6 +291,7 @@ screens.home = () => {
       <div class="tools">
         <button class="btn ${ytUnlocked ? 'ok' : 'gold'}" data-a="sound">${ytUnlocked ? '✅ 사운드 준비됨' : '🔊 사운드 준비 (먼저!)'}</button>
         ${NET.info ? '<button class="btn primary" data-a="phones">📱 폰 연결</button>' : ''}
+        <button class="btn" data-a="scores">🏅 점수판</button>
         <button class="btn" data-a="fs">⛶ 전체화면</button>
         <button class="btn" data-a="settings">⚙️ 설정</button>
       </div>
@@ -216,6 +300,7 @@ screens.home = () => {
     open: (k) => go(k),
     sound: () => go('sound'),
     phones: () => go('phones'),
+    scores: () => go('scores'),
     settings: () => go('settings'),
     fs: () => {
       const d = document.documentElement;
@@ -334,6 +419,9 @@ screens.ost = () => screens.music('ost');
 // ── 🎲 팀 나누기 ──
 screens.teams = () => {
   const parse = (txt) => [...new Set(txt.split(/[\n,]/).map((s) => s.trim()).filter(Boolean))];
+  const tms = [];
+  const later = (fn, ms) => { tms.push(setTimeout(fn, ms)); };
+  onCleanup(() => tms.forEach(clearTimeout));
 
   function setup() {
     const players = S.players || [];
@@ -346,7 +434,9 @@ screens.teams = () => {
           </div>
           <div class="controls">
             <div class="pill" id="cnt" style="text-align:center">${players.length}명</div>
-            <button class="btn big primary" data-a="draw">🎲 팀 뽑기 시작!</button>
+            <button class="btn big gold" data-a="leaders">👑 리더 드래프트</button>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">사전 게임으로 뽑힌 리더 2명이 번갈아 팀원을 뽑아요</p>
+            <button class="btn primary" data-a="draw">🎲 무작위로 나누기</button>
             ${S.roster ? '<button class="btn" data-a="last">📋 지난 결과 보기</button>' : ''}
           </div>
         </div>
@@ -357,17 +447,110 @@ screens.teams = () => {
       draw: () => {
         const names = parse(ta.value);
         if (names.length < 2) { toast('2명 이상 입력해 주세요'); return; }
-        S.players = names; save(); draw(names);
+        S.players = names; S.leaders = null; save(); draw(names);
+      },
+      leaders: () => {
+        const names = parse(ta.value);
+        if (names.length < 4) { toast('리더 드래프트는 4명 이상일 때 할 수 있어요'); return; }
+        S.players = names; save(); pickLeaders(names);
       },
       last: () => result(S.roster, true),
     };
+  }
+
+  // ── 👑 리더 정하기: 사전 게임에서 이긴 2명을 누름 ──
+  function pickLeaders(names) {
+    let L = (S.leaders || []).filter((n) => names.includes(n)).slice(0, 2), first = 'coin';
+    if (S.leaderTeamName === undefined) S.leaderTeamName = true;
+    function draw() {
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>👑 리더 정하기</h2><span class="sub">사전 게임에서 이긴 2명을 차례로 누르세요 (먼저 누른 사람 = A팀 리더)</span></div>
+          <div class="stage-wrap">
+            <div class="stage"><div class="ngrid">${names.map((n) => {
+              const k = L.indexOf(n);
+              return `<button class="nbtn${k === 0 ? ' tA cur' : k === 1 ? ' tB cur' : ''}" data-a="pick" data-v="${esc(n)}">${k >= 0 ? '👑 ' : ''}${esc(n)}${k >= 0 ? `<small>${k ? 'B' : 'A'}팀 리더</small>` : ''}</button>`;
+            }).join('')}</div></div>
+            <div class="controls">
+              <div class="pill" style="text-align:center"><span style="color:var(--A)">A 👑 ${L[0] ? esc(L[0]) : '?'}</span> · <span style="color:var(--B)">B 👑 ${L[1] ? esc(L[1]) : '?'}</span></div>
+              <p class="sub" style="margin:0;text-align:center;color:var(--muted)">누가 먼저 뽑을까요?</p>
+              <div class="chips">${[['a', 'A 리더 먼저'], ['b', 'B 리더 먼저'], ['coin', '🪙 동전 던지기']].map(([k, l]) => `<button class="chip ${first === k ? 'on' : ''}" data-a="first" data-v="${k}">${l}</button>`).join('')}</div>
+              <button class="btn ${S.leaderTeamName ? 'on' : ''}" data-a="rename">🏷 팀 이름을 "리더 이름 + 팀"으로 ${S.leaderTeamName ? 'ON' : 'OFF'}</button>
+              <button class="btn big primary" data-a="go" ${L.length < 2 ? 'disabled' : ''}>▶ 드래프트 시작</button>
+              <button class="btn" data-a="back">✏️ 명단 수정</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    actions = {
+      pick: (v) => {
+        const i = L.indexOf(v);
+        if (i >= 0) L.splice(i, 1);
+        else if (L.length < 2) { L.push(v); sfx.ok(); flash(L.length === 1 ? 'var(--A)' : 'var(--B)'); }
+        else { toast('리더는 2명이에요. 바꾸려면 리더를 한 번 더 눌러 빼 주세요'); return; }
+        draw();
+      },
+      first: (v) => { first = v; draw(); },
+      rename: () => { S.leaderTeamName = !S.leaderTeamName; save(); draw(); },
+      back: () => setup(),
+      go: () => {
+        if (L.length < 2) return;
+        S.leaders = L.slice(); save();
+        if (first !== 'coin') return draft(names, L, first === 'b' ? 1 : 0);
+        // 🪙 동전 던지기 연출
+        const t = Math.random() < 0.5 ? 0 : 1;
+        main.innerHTML = '<div class="screen"><div class="stage"><div class="medal drumroll" style="font-size:clamp(80px,24vmin,180px)">🪙</div><div class="result-big">동전 던지는 중…</div></div></div>';
+        actions = {};
+        for (let i = 0; i < 12; i++) later(() => sfx.tick(), i * 110);
+        later(() => {
+          sfx.fanfare(); flash(t ? 'var(--B)' : 'var(--A)');
+          main.innerHTML = `<div class="screen"><div class="stage"><div class="result-big pop" style="color:var(--${t ? 'B' : 'A'})">👑 ${esc(L[t])} 리더 먼저!</div></div></div>`;
+          later(() => draft(names, L, t), 1500);
+        }, 1400);
+      },
+    };
+    draw();
+  }
+
+  // ── 드래프트: 리더가 번갈아 1명씩. 마지막 1명은 자동 배정 ──
+  function draft(names, L, firstT) {
+    const teams = [[L[0]], [L[1]]], picks = [];
+    let turn = firstT;
+    const pool = () => names.filter((n) => !teams[0].includes(n) && !teams[1].includes(n));
+    function draw(last) {
+      let rest = pool();
+      if (rest.length === 1) { // 마지막 남은 사람은 차례인 팀으로
+        teams[turn].push(rest[0]); picks.push({ n: rest[0], t: turn, auto: true });
+        toast(`마지막 남은 ${rest[0]} 님은 ${L[turn]} 리더 팀으로!`); last = { n: rest[0], t: turn }; turn = 1 - turn; rest = [];
+      }
+      if (!rest.length) {
+        if (S.leaderTeamName) { S.teams[0].name = `${L[0]}팀`.slice(0, 12); S.teams[1].name = `${L[1]}팀`.slice(0, 12); renderScore(); }
+        return later(() => result(teams, false), last ? 900 : 0);
+      }
+      main.innerHTML = `<div class="screen">${board(teams, `👑 ${L[turn]}`, last ? last.t : null)}</div>`;
+      const slot = $('#slot'); slot.className = 'slot ' + (turn ? 'B' : 'A');
+      $('#tact').innerHTML = `
+        <p class="notice" style="margin:0;text-align:center">${esc(L[turn])} 리더 차례! 뽑을 사람을 누르세요 <small style="color:var(--muted)">(남은 ${rest.length}명)</small></p>
+        <div class="ngrid">${rest.map((n) => `<button class="nbtn" data-a="take" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        <div class="row"><button class="btn" data-a="undo" ${picks.length ? '' : 'disabled'}>↩️ 취소</button><button class="btn" data-a="restart">✏️ 리더 다시 정하기</button></div>`;
+      actions = {
+        take: (v) => { teams[turn].push(v); picks.push({ n: v, t: turn }); sfx.ok(); flash(turn ? 'var(--B)' : 'var(--A)'); const t = turn; turn = 1 - turn; draw({ n: v, t }); },
+        undo: () => {
+          let p = picks.pop(); if (p && p.auto) { teams[p.t].pop(); p = picks.pop(); }
+          if (!p) return draw();
+          teams[p.t].pop(); turn = p.t; sfx.tick(); draw();
+        },
+        restart: () => pickLeaders(names),
+      };
+    }
+    draw();
   }
 
   function board(teams, current, curTeam) {
     const col = (t) => `
       <div class="tcol ${t ? 'B' : 'A'}">
         <div class="tname">${esc(S.teams[t].name)} <small>${teams[t].length}명</small></div>
-        ${teams[t].map((n, k) => `<div class="tmember ${k === teams[t].length - 1 && curTeam === t ? 'pop' : ''}">${esc(n)}</div>`).join('')}
+        ${teams[t].map((n, k) => `<div class="tmember ${k === teams[t].length - 1 && curTeam === t ? 'pop' : ''}">${S.leaders && S.leaders.includes(n) ? '👑 ' : ''}${esc(n)}</div>`).join('')}
       </div>`;
     return `
       <div class="tboard">
@@ -420,7 +603,10 @@ screens.teams = () => {
   }
 
   function result(teams, fromSaved) {
-    if (!fromSaved) { S.roster = teams; save(); sfx.fanfare(); }
+    if (!fromSaved) {
+      S.roster = teams; save(); sfx.fanfare(); pushScores();
+      if (typeof Party !== 'undefined' && Party.h) Party.open(); // 폰 연결 명단·팀 이름 갱신
+    }
     main.innerHTML = `<div class="screen">${board(teams, '⚔️ VS ⚔️')}</div>`;
     $('#tact').innerHTML = `
       <button class="btn big primary" data-a="home">✅ 이대로 시작!</button>
@@ -428,7 +614,7 @@ screens.teams = () => {
       <button class="btn" data-a="edit">✏️ 명단 수정</button>`;
     actions = {
       home: () => go('home'),
-      again: () => draw(S.players || [...teams[0], ...teams[1]]),
+      again: () => { const names = S.players || [...teams[0], ...teams[1]]; if (S.leaders) pickLeaders(names); else draw(names); },
       edit: () => setup(),
     };
   }
@@ -2267,8 +2453,111 @@ screens.settings = () => {
       save(); renderScore(); sfx.ok(); toast('저장했어요');
     },
     resetPen: () => { $('#pen').value = DEFAULT_PENALTIES.join('\n'); },
-    resetScore: () => { if (confirm('점수를 0:0으로 초기화할까요?')) { S.teams.forEach((t) => { t.score = 0; }); save(); renderScore(); toast('점수 초기화'); } },
+    resetScore: () => { if (confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?')) { S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; save(); renderScore(); pushScores(); toast('점수 초기화'); } },
   };
+};
+
+// ── 🏅 점수판: 팀 점수 + 개인 포인트 수정, 폰 공개 범위 ──
+screens.scores = () => {
+  const SHOW = [['all', '팀 + 개인 순위'], ['team', '팀 점수만'], ['off', '숨김']];
+  const medal = (x) => (x.p > 0 && x.r <= 3 ? ['🥇', '🥈', '🥉'][x.r - 1] + ' ' : '');
+  function col(t, R) {
+    const mem = R.filter((x) => x.t === t);
+    return `
+      <div class="scol ${t ? 'B' : 'A'}">
+        <div class="shead"><span>${esc(S.teams[t].name)}</span>
+          <span class="row" style="gap:4px;flex-wrap:nowrap"><button data-a="team" data-v="${t}:-1">−</button><b>${S.teams[t].score}</b><button data-a="team" data-v="${t}:1">＋</button></span></div>
+        ${mem.map((x) => `<div class="prow"><span>${medal(x)}${S.leaders && S.leaders.includes(x.n) ? '👑 ' : ''}${esc(x.n)}</span>
+          <button data-a="ind" data-v="${t}|-1|${esc(x.n)}">−</button><span class="pp">${x.p}</span><button data-a="ind" data-v="${t}|1|${esc(x.n)}">＋</button></div>`).join('')
+          || '<p class="sub" style="color:var(--muted);text-align:center">🎲 팀 나누기를 하면 팀원이 여기에 나와요</p>'}
+      </div>`;
+  }
+  function draw() {
+    const R = ranked();
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🏅 점수판</h2><span class="sub">팀 점수와 개인 포인트를 −/＋로 고칠 수 있어요</span></div>
+        <div class="stage-wrap">
+          <div class="sboard">${col(0, R)}${col(1, R)}</div>
+          <div class="controls">
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">📱 참가자 폰에 공개할 범위</p>
+            <div class="chips">${SHOW.map(([k, l]) => `<button class="chip ${S.scoreShow === k ? 'on' : ''}" data-a="show" data-v="${k}">${l}</button>`).join('')}</div>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${NET.info ? (Party.st ? `지금 폰 ${Party.members().length}대에 실시간으로 보입니다` : '홈 → 📱 폰 연결을 열면 폰에서 볼 수 있어요') : '노트북 서버(start.bat)로 열면 폰에서 볼 수 있어요'}</p>
+            <button class="btn ${S.askWho ? 'on' : ''}" data-a="ask">🙋 팀 점수 줄 때 "누가 맞혔나요?" ${S.askWho ? 'ON' : 'OFF'}</button>
+            <button class="btn big gold" data-a="awards">🏆 시상식</button>
+            <button class="btn bad" data-a="reset">개인 포인트 초기화</button>
+          </div>
+        </div>
+      </div>`;
+  }
+  actions = {
+    team: (v) => { const [t, n] = v.split(':').map(Number); addScore(t, n, false); n > 0 ? sfx.ok() : sfx.bad(); draw(); },
+    ind: (v) => { const [t, n, ...rest] = v.split('|'); addIndiv(rest.join('|'), Number(t), Number(n)); Number(n) > 0 ? sfx.ok() : sfx.tick(); draw(); },
+    show: (v) => { S.scoreShow = v; save(); pushScores(); sfx.tick(); toast(`📱 참가자 폰: ${SHOW.find((x) => x[0] === v)[1]}`); draw(); },
+    ask: () => { S.askWho = !S.askWho; save(); draw(); },
+    awards: () => go('awards'),
+    reset: () => { if (confirm('개인 포인트를 모두 0으로 만들까요? (팀 점수는 그대로)')) { S.indiv = {}; save(); pushScores(); draw(); toast('개인 포인트 초기화'); } },
+  };
+  draw();
+};
+
+// ── 🏆 시상식: 팀 우승 → 개인 3위 → 2위 → 1위(MVP) 순서로 두구두구 공개 ──
+screens.awards = () => {
+  const [a, b] = S.teams.map((t) => t.score);
+  const win = a === b ? null : a > b ? 0 : 1;
+  // 개인: 포인트가 같으면 공동 수상 (1위 그룹, 2위 그룹, 3위 그룹)
+  const groups = [];
+  ranked().filter((x) => x.p > 0).forEach((x) => { const g = groups[groups.length - 1]; if (g && g.p === x.p) g.list.push(x); else groups.push({ p: x.p, list: [x] }); });
+  const top = groups.slice(0, 3);
+  const steps = ['intro', 'team', ...top.map((_, i) => i).reverse(), 'end'];
+  let k = 0, timers = [];
+  onCleanup(() => timers.forEach(clearTimeout));
+  const tag = (x) => `${S.leaders && S.leaders.includes(x.n) ? '👑 ' : ''}${esc(x.n)} <small style="color:var(--${x.t ? 'B' : 'A'})">${esc(S.teams[x.t].name)}</small>`;
+  const MED = [['🥇', '1위 · MVP'], ['🥈', '2위'], ['🥉', '3위']];
+
+  function show(drum) {
+    const s = steps[k];
+    let body = '';
+    if (s === 'intro') body = `<div class="medal">🏆</div><div class="names-big">시상식</div><p class="notice" style="margin:0">팀 우승 → 개인 3위 → 2위 → 1위(MVP) 순서로 공개합니다</p>`;
+    else if (s === 'team') body = drum ? '<div class="medal drumroll">🥁</div><div class="names-big">팀 우승은…</div>'
+      : `<div class="medal pop">${win == null ? '🤝' : '🏆'}</div><div class="names-big pop">${win == null ? '공동 우승!' : esc(S.teams[win].name) + ' 우승!'}</div>
+         <div class="answer">${esc(S.teams[0].name)} ${a} : ${b} ${esc(S.teams[1].name)}</div>`;
+    else if (s === 'end') body = `<div class="names-big">🎉 모두 수고하셨습니다!</div>
+      <div class="sc-list" style="width:min(520px,100%)">${win == null ? '' : `<div class="sc-row"><span>🏆</span><span>팀 우승</span><b>${esc(S.teams[win].name)}</b></div>`}
+        ${top.map((g, i) => `<div class="sc-row"><span>${MED[i][0]}</span><span>${g.list.map((x) => esc(x.n)).join(', ')}</span><b>${g.p}점</b></div>`).join('')}</div>`;
+    else {
+      const g = top[s];
+      body = drum ? `<div class="medal drumroll">🥁</div><div class="names-big">개인 ${MED[s][1]}는…</div>`
+        : `<div class="medal pop">${MED[s][0]}</div><p class="notice" style="margin:0">개인 ${MED[s][1]}${g.list.length > 1 ? ` (공동 ${g.list.length}명)` : ''}</p>
+           <div class="names-big pop">${g.list.map(tag).join('<br>')}</div><div class="answer">${g.p}점</div>`;
+    }
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🏆 시상식</h2><span class="pill">${Math.min(k + 1, steps.length)} / ${steps.length}</span></div>
+        <div class="stage award-stage">${body}</div>
+        <div class="row" style="margin-top:8px">
+          ${k > 0 ? '<button class="btn" data-a="prev">◀ 이전</button>' : ''}
+          ${s === 'end' ? `<button class="btn primary" data-a="phones">📱 폰에 전체 순위 공개</button><button class="btn" data-a="board">🏅 점수판</button>`
+            : `<button class="btn big gold" data-a="next" ${drum ? 'disabled' : ''}>${s === 'intro' ? '🥁 시작!' : '다음 공개 ▶'}</button>`}
+        </div>
+      </div>`;
+  }
+  // 두구두구 2.4초 → 공개
+  function reveal() {
+    const s = steps[k];
+    if (s === 'intro' || s === 'end') { show(false); if (s === 'end') sfx.fanfare(); return; }
+    show(true);
+    for (let i = 0; i < 24; i++) timers.push(setTimeout(() => tone(180 + (i % 2) * 30, 0.06, 'triangle', 0.25), i * 100));
+    timers.push(setTimeout(() => { show(false); sfx.fanfare(); flash('var(--gold)'); }, 2500));
+  }
+  actions = {
+    next: () => { if (k < steps.length - 1) { k++; reveal(); } },
+    prev: () => { timers.forEach(clearTimeout); timers = []; if (k > 0) { k--; show(false); } },
+    phones: () => { S.scoreShow = 'all'; save(); pushScores(); toast('📱 참가자 폰에 팀 점수와 개인 순위를 공개했어요'); },
+    board: () => go('scores'),
+  };
+  if (!groups.length) toast('아직 개인 포인트를 받은 사람이 없어요. 팀 우승만 발표합니다', 3500);
+  show(false);
 };
 
 // ═══════════════════════ 시작 ═══════════════════════

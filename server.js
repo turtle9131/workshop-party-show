@@ -173,7 +173,23 @@ function partyPlayerView(m) {
     v.done = !!a.done;
   }
   if (a.kind === 'allin') { v.open = a.open; v.mine = a.answers[m.team]; }
+  // 🏅 점수 현황: 진행 화면이 정한 공개 범위대로 (all: 팀+개인 순위, team: 팀 점수 + 내 포인트만, off: 안 보냄)
+  const s = P.scores;
+  if (s && s.mode !== 'off') {
+    const mine = s.indiv.find((x) => x.name === m.name);
+    v.scores = { mode: s.mode, teams: s.teams, leaders: s.leaders, mine: mine ? mine.pts : 0, indiv: s.mode === 'all' ? s.indiv : null };
+  }
   return v;
+}
+function cleanScores(s) {
+  if (!s || typeof s !== 'object') return null;
+  const num = (x) => (Number.isFinite(+x) ? Math.round(+x) : 0), str = (x, n) => String(x == null ? '' : x).slice(0, n);
+  return {
+    mode: ['all', 'team', 'off'].includes(s.mode) ? s.mode : 'all',
+    teams: (Array.isArray(s.teams) ? s.teams : []).slice(0, 2).map((t) => ({ name: str(t && t.name, 12), score: num(t && t.score) })),
+    leaders: Array.isArray(s.leaders) ? s.leaders.slice(0, 2).map((x) => str(x, 20)) : null,
+    indiv: (Array.isArray(s.indiv) ? s.indiv : []).slice(0, 80).map((x) => ({ name: str(x && x.name, 20), team: x && x.team === 1 ? 1 : 0, pts: num(x && x.pts) })),
+  };
 }
 function pBroadcast() {
   if (!P) return;
@@ -445,6 +461,7 @@ async function partyApi(route, req, res, q) {
     else if (op === 'drawEnd') { if (a.kind === 'draw') a.done = true; }
     else if (op === 'allin') P.act = { kind: 'allin', open: true, answers: { 0: null, 1: null } };
     else if (op === 'allinClose') { if (a.kind === 'allin') a.open = false; }
+    else if (op === 'score') P.scores = cleanScores(b.scores);
     else return json(res, 400, { error: 'op' });
     pBroadcast();
     return json(res, 200, { ok: true, act: partyHostView().act });

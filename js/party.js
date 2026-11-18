@@ -134,7 +134,7 @@ async function rosterJoinScreen(o) {
 // 행사 내내 하나의 방을 씁니다. 참가자는 play.html 로 한 번 접속(이름·팀)해 두면,
 // 진행 화면이 여는 게임(버저·폭탄·캐치마인드·올인)에 맞춰 폰 화면이 바뀝니다.
 const Party = {
-  st: null, h: null, subs: new Set(), opening: null,
+  st: null, h: null, subs: new Set(), opening: null, lastBuzz: null,
   // 연결된 폰이 한 명이라도 있으면 폰 방식으로 진행
   get active() { return !!(Party.st && Party.st.members.length); },
   members(team) { return Party.st ? Party.st.members.filter((m) => team === undefined || m.team === team) : []; },
@@ -149,6 +149,7 @@ const Party = {
       const roster = S.roster && S.roster.length === 2 ? S.roster : null;
       const j = await NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster, force: !!force });
       S.partyHt = j.ht; save();
+      if (typeof pushScores === 'function') pushScores(); // 폰에 현재 점수 보내기
     } catch (e) {
       if (e && e.error === 'exists') {
         if (!force && confirm('다른 진행 화면이 이미 폰 연결 방을 열어 두었어요.\n이 화면에서 새로 열까요? (지금 접속한 폰은 다시 접속해야 합니다)')) return Party.open(true);
@@ -159,7 +160,8 @@ const Party = {
       Party.h = NET.stream(`/api/p/events?ht=${S.partyHt}`, (v) => {
         if (v.t === 'host') { Party.st = v; Party.badge(); }
         Party.emit(v);
-      }, () => NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster: S.roster || null }).catch(() => null));
+      }, () => NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster: S.roster || null })
+        .then(() => { if (typeof pushScores === 'function') pushScores(); }).catch(() => null));
     }
     return true;
   },
@@ -194,6 +196,7 @@ const Party = {
       if (key === shown) return;
       shown = key;
       if (f) {
+        Party.lastBuzz = { name: f.name, team: f.team, at: Date.now() }; // "누가 맞혔나요?"에서 맨 앞에 표시
         sfx.go(); flash(f.team ? 'var(--B)' : 'var(--A)');
         if (onBuzz) onBuzz(f.team);
         Party.banner(f, v.act.exclude);
