@@ -191,6 +191,7 @@ const GAMES = [
   { key: 'allin', ic: '🔥', t: '올인 역전', d: '마지막 대역전' },
   { key: 'mafia', ic: '🕵️', t: '마피아', d: '사회자 진행' },
   { key: 'liar', ic: '🤥', t: '라이어 게임', d: '거짓말쟁이를 찾아라' },
+  { key: 'tables', ic: '🏓', t: '탁구·당구', d: '2부 대항전' },
   { key: 'roulette', ic: '🎰', t: '벌칙 룰렛', d: '운명의 룰렛' },
 ];
 
@@ -1079,6 +1080,367 @@ screens.roulette = () => {
       raf = requestAnimationFrame(step);
     },
   };
+};
+
+// ── 🏓 탁구·당구 대항전 ──
+// 규칙 카드 + 게임별 진행 도구. 이긴 팀 보너스는 위 점수판에 그대로 더해집니다.
+const TABLE_GAMES = [
+  { key: 'rotate', tb: 'ping', ic: '🔄', t: '돌림 탁구', d: '전원 생존전', tool: 'survive', prize: 3, rules: [
+    '전원이 탁구대 양쪽에 반씩 줄을 섭니다.',
+    '한 번 치면 탁구대를 돌아 <b>반대편 줄 끝</b>으로 뛰어갑니다.',
+    '공을 놓치거나 아웃되면 <b>탈락</b>! 화면에서 이름을 누르세요.',
+    '2명이 남으면 결승: <b>3점</b> 먼저 내는 사람이 우승!',
+    '우승자의 팀이 보너스 점수를 받습니다.'] },
+  { key: 'cups', tb: 'ping', ic: '🥤', t: '컵 넣기', d: 'A팀 vs B팀', tool: 'cups', prize: 3, rules: [
+    '탁구대 양 끝에 물 담은 종이컵을 삼각형으로 놓습니다.',
+    '팀원이 돌아가며 공을 던져 <b>상대 팀 컵</b>에 넣습니다.',
+    '들어간 컵은 빼고, 바닥에 한 번 튕겨 넣으면 <b>2개</b>를 뺍니다.',
+    '상대 컵을 먼저 다 없앤 팀이 승리!'] },
+  { key: 'blow', tb: 'ping', ic: '💨', t: '바람 탁구', d: '입으로만 후~', tool: 'match', target: 5, prize: 2, rules: [
+    '양 팀이 탁구대 양쪽에 무릎을 꿇고 앉습니다. (2~3명씩, 1점마다 교대)',
+    '가운데 놓은 공을 <b>입으로만</b> 불어서 상대 쪽 바닥으로 떨어뜨립니다.',
+    '손이나 얼굴이 공에 닿으면 상대 점수!',
+    '먼저 목표 점수를 낸 팀이 승리'] },
+  { key: 'handi', tb: 'ping', ic: '🍳', t: '핸디캡 탁구', d: '핸디캡 뽑기', tool: 'match', target: 7, handicap: true, prize: 2, rules: [
+    'A팀 1명 vs B팀 1명이 칩니다. 1점마다 다음 사람으로 교대!',
+    '잘 치는 사람은 <b>🎲 핸디캡 뽑기</b>로 핸디캡을 걸고 칩니다.',
+    '서브는 2점마다 넘깁니다.',
+    '먼저 목표 점수를 낸 팀이 승리'] },
+  { key: 'serve', tb: 'ping', ic: '🎯', t: '과녁 서브', d: '한 명씩 서브', tool: 'serve', prize: 2, rules: [
+    '상대 코트에 종이컵이나 A4 용지로 과녁을 놓습니다. (작을수록 높은 점수: 1·3·5점)',
+    '팀이 번갈아 <b>한 명씩</b> 서브합니다. 화면에 차례가 나옵니다.',
+    '맞힌 과녁 점수를 누르세요. 빗나가면 [빗나감]',
+    '모두 서브하면 합계가 높은 팀이 승리'] },
+  { key: 'killer', tb: 'pool', ic: '💀', t: '킬러', d: '목숨 3개 생존전', tool: 'lives', prize: 3, rules: [
+    '각자 목숨이 3개. 화면의 순서대로 <b>한 번씩만</b> 칩니다.',
+    '아무 공이나 넣으면 통과, 못 넣으면 <b>목숨 −1</b>',
+    '흰 공이 들어가도(스크래치) 목숨 −1',
+    '목숨이 0이 되면 탈락, 마지막 생존자가 우승!',
+    '공이 다 들어가면 다시 세팅하고 이어서 합니다.'] },
+  { key: 'curling', tb: 'pool', ic: '🥌', t: '당구 컬링', d: '힘 조절 대결', tool: 'curling', target: 3, prize: 2, rules: [
+    '한 명씩 흰 공을 쳐서 <b>반대편 쿠션을 맞고</b> 돌아오게 합니다.',
+    '출발 쪽 쿠션에 <b>가장 가깝게</b> 멈춘 사람이 그 라운드 승리',
+    '라운드마다 양 팀에서 한 명씩 나와 칩니다. 이긴 사람 이름을 누르세요.',
+    '먼저 목표 라운드 수를 이긴 팀이 승리'] },
+  { key: 'hand', tb: 'pool', ic: '✋', t: '손 당구', d: '30초 타임어택', tool: 'timed', sec: 30, prize: 2, rules: [
+    '큐 없이 <b>손으로</b> 흰 공을 굴려 다른 공을 맞혀 넣습니다.',
+    '다른 공을 손으로 직접 굴리면 무효!',
+    '팀별로 30초 동안 팀원이 돌아가며 굴립니다. 넣을 때마다 [+1]',
+    '더 많이 넣은 팀이 승리'] },
+  { key: 'relay', tb: 'pool', ic: '🎱', t: '릴레이 포켓볼', d: '한 큐씩 교대', tool: 'relay', prize: 3, rules: [
+    '팀별로 칠 공(줄무늬 / 단색)을 정합니다.',
+    '팀원이 <b>한 큐씩</b> 순서대로 칩니다. 잘 치는 사람이 혼자 끝낼 수 없어요!',
+    '넣으면 우리 팀 다음 사람이 이어서, 못 넣으면 상대 팀 차례',
+    '자기 공을 다 넣고 8번 공까지 넣으면 승리 (8번을 먼저 넣으면 패배)'] },
+];
+const HANDICAPS = ['반대손으로 치기', '폰을 라켓으로', '슬리퍼를 라켓으로', '한 발로 서서', '한쪽 눈 감고', '라켓 손잡이 끝만 잡기',
+  '칠 때마다 "나이스!" 외치기', '책을 라켓으로', '쪼그려 앉아서', '상대 팀이 고른 물건으로', '라켓 대신 손바닥으로', '핸디캡 없음 (행운!)'];
+
+screens.tables = () => {
+  if (!S.tbl) S.tbl = {};
+  const roster = Array.isArray(S.roster) && S.roster.length === 2 ? S.roster : null;
+  const names = roster ? [...roster[0], ...roster[1]] : (S.players || []).slice();
+  const teamOf = (n) => (!roster ? null : roster[0].includes(n) ? 0 : roster[1].includes(n) ? 1 : null);
+  const tc = (n) => ({ 0: ' tA', 1: ' tB' }[teamOf(n)] || '');
+  const TN = (t) => esc(S.teams[t].name);
+  const who = (t, i) => (roster && roster[t].length ? roster[t][i % roster[t].length] : `${i % 5 + 1}번 선수`);
+  const hearts = (l, max) => '❤️'.repeat(Math.max(0, l)) + '🖤'.repeat(Math.max(0, max - l));
+  const muted = (s) => `<small style="color:var(--muted)">${s}</small>`;
+  const col = (t, inner) => `<div class="bet ${t ? 'B' : 'A'}"><b>${TN(t)}</b>${inner}</div>`;
+  const banner = (t) => `<div class="result-big pop">🏆 ${t == null ? '동점!' : TN(t) + ' 승리!'}</div>`;
+  const firstTo = (sc, n) => { const t = [0, 1].find((k) => sc[k] >= n); return t == null ? null : { t }; };
+  const higher = (sc) => ({ t: sc[0] === sc[1] ? null : sc[0] > sc[1] ? 0 : 1 });
+  const needNames = `<p class="notice" style="margin:0">참가자 명단이 없어요</p>
+    <p class="sub" style="margin:0;color:var(--muted)">🎲 팀 나누기에서 이름을 넣고 팀을 뽑으면 이름과 팀이 자동으로 들어옵니다.</p>
+    <button class="btn primary" data-a="toTeams">🎲 팀 나누기로</button>`;
+
+  let G = null, tool = null, st = null, hist = [], rulesOn = false, running = false, left = 0, stopT = null, spinT = null;
+  const stopTimer = () => { if (stopT) { stopT(); stopT = null; } running = false; };
+  onCleanup(stopTimer); onCleanup(() => clearTimeout(spinT));
+  const persist = () => { S.tbl[G.key] = st; save(); };
+  // 상태를 바꾸는 동작은 모두 여기를 거쳐서 [↩️ 되돌리기]가 가능
+  const mut = (fn) => { hist.push(JSON.stringify(st)); if (hist.length > 60) hist.shift(); fn(st); persist(); draw(); };
+
+  const TOOLS = {
+    // 돌림 탁구: 탈락자 표시 → 마지막 1명 우승
+    survive: {
+      init: () => ({ order: shuffle(names), out: [] }),
+      alive: (s) => s.order.filter((n) => !s.out.includes(n)),
+      winner: (s) => { const a = TOOLS.survive.alive(s); return s.order.length > 1 && a.length === 1 ? { t: teamOf(a[0]) } : null; },
+      board: (s) => {
+        if (s.order.length < 2) return needNames;
+        const a = TOOLS.survive.alive(s), done = a.length === 1;
+        return `${done ? `<div class="result-big pop">🏆 ${esc(a[0])} 우승!</div>`
+          : `<div class="row"><span class="pill">남은 사람 ${a.length} / ${s.order.length}명</span>${a.length === 2 ? '<span class="notice">🔥 결승! 3점 먼저 내면 우승</span>' : ''}</div>`}
+          <div class="ngrid">${s.order.map((n) => `<button class="nbtn${tc(n)}${s.out.includes(n) ? ' dead' : ''}" data-a="tap" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+          ${done ? '' : muted('탈락한 사람 이름을 누르세요 (다시 누르면 복귀) · 줄 서는 순서대로 표시')}`;
+      },
+      ctrls: () => '<button class="btn" data-a="mix">🔀 줄 순서 섞기</button>',
+      acts: () => ({
+        tap: (v) => mut((s) => { const i = s.out.indexOf(v); if (i >= 0) s.out.splice(i, 1); else { s.out.push(v); TOOLS.survive.winner(s) ? sfx.fanfare() : sfx.bad(); } }),
+        mix: () => mut((s) => { s.order = shuffle(s.order); }),
+      }),
+    },
+    // 킬러: 순서대로 한 번씩, 못 넣으면 목숨 −1
+    lives: {
+      init: () => { const order = shuffle(names); return { order, life: order.map(() => 3), max: 3, cur: 0 }; },
+      alive: (s) => s.order.filter((_, i) => s.life[i] > 0),
+      winner: (s) => { const a = TOOLS.lives.alive(s); return s.order.length > 1 && a.length === 1 ? { t: teamOf(a[0]) } : null; },
+      board: (s) => {
+        if (s.order.length < 2) return needNames;
+        const a = TOOLS.lives.alive(s), done = a.length === 1;
+        return `${done ? `<div class="result-big pop">🏆 ${esc(a[0])} 생존!</div>`
+          : `<div class="notice" style="margin:0">🎱 지금 차례: <b style="font-size:1.4em;color:var(--text)">${esc(s.order[s.cur])}</b> ${muted(`· 생존 ${a.length}명`)}</div>`}
+          <div class="ngrid">${s.order.map((n, i) => `<button class="nbtn${tc(n)}${s.life[i] <= 0 ? ' dead' : ''}${i === s.cur && !done ? ' cur' : ''}" data-a="pick" data-v="${i}">${esc(n)}<small>${s.life[i] > 0 ? hearts(s.life[i], s.max) : '💀 탈락'}</small></button>`).join('')}</div>
+          ${done ? '' : muted('이름을 누르면 그 사람 차례로 바뀝니다')}`;
+      },
+      ctrls: (s) => `${TOOLS.lives.winner(s) ? '' : '<div class="row"><button class="btn big ok" data-a="hit">⭕ 넣음</button><button class="btn big bad" data-a="miss">❌ 못 넣음</button></div>'}
+        <div class="chips">${[2, 3, 4].map((m) => `<button class="chip ${s.max === m ? 'on' : ''}" data-a="max" data-v="${m}">목숨 ${m}개</button>`).join('')}</div>`,
+      acts: () => {
+        const next = (s) => { for (let k = 1; k <= s.order.length; k++) { const j = (s.cur + k) % s.order.length; if (s.life[j] > 0) { s.cur = j; return; } } };
+        return {
+          hit: () => { if (!TOOLS.lives.winner(st)) mut((s) => { sfx.ok(); next(s); }); },
+          miss: () => {
+            if (TOOLS.lives.winner(st)) return;
+            mut((s) => {
+              s.life[s.cur]--;
+              if (s.life[s.cur] <= 0) { toast(`💀 ${s.order[s.cur]} 님 탈락!`); TOOLS.lives.winner(s) ? sfx.fanfare() : sfx.boom(); } else sfx.bad();
+              next(s);
+            });
+          },
+          pick: (v) => { const i = Number(v); if (st.life[i] > 0 && !TOOLS.lives.winner(st)) mut((s) => { s.cur = i; }); },
+          max: (v) => mut((s) => { s.max = Number(v); s.life = s.life.map(() => s.max); s.cur = 0; toast(`목숨을 ${s.max}개로 다시 채웠어요`); }),
+        };
+      },
+    },
+    // 컵 넣기: 팀별로 상대 컵을 몇 개 없앴는지
+    cups: {
+      init: () => ({ n: 6, hit: [0, 0] }),
+      winner: (s) => firstTo(s.hit, s.n),
+      board: (s) => {
+        const w = TOOLS.cups.winner(s);
+        const cups = (t) => `<div class="cups">${range(s.n).map((i) => `<span class="${i < s.hit[t] ? 'gone' : ''}">🥤</span>`).join('')}</div>`;
+        return `${w ? banner(w.t) : muted('넣은 팀 쪽 버튼을 누르세요. 상대 컵이 하나씩 빠집니다.')}
+          <div class="bets">${[0, 1].map((t) => col(t, `${muted('상대 컵 남은 개수')}<div class="amt">${Math.max(0, s.n - s.hit[t])}</div>${cups(t)}
+            <div class="row"><button class="btn ok" data-a="hit" data-v="${t}:1">🎯 +1</button><button class="btn gold" data-a="hit" data-v="${t}:2">💥 바운드 +2</button><button class="btn" data-a="hit" data-v="${t}:-1">−1</button></div>`)).join('')}</div>`;
+      },
+      ctrls: (s) => `<div class="chips">${[6, 10].map((m) => `<button class="chip ${s.n === m ? 'on' : ''}" data-a="n" data-v="${m}">컵 ${m}개</button>`).join('')}</div>`,
+      acts: () => ({
+        hit: (v) => {
+          const [t, d] = v.split(':').map(Number);
+          if (d > 0 && TOOLS.cups.winner(st)) return;
+          mut((s) => { s.hit[t] = Math.max(0, Math.min(s.n, s.hit[t] + d)); if (d > 0) { flash(t ? 'var(--B)' : 'var(--A)'); s.hit[t] >= s.n ? sfx.fanfare() : sfx.ok(); } else sfx.tick(); });
+        },
+        n: (v) => mut((s) => { s.n = Number(v); s.hit = [0, 0]; }),
+      }),
+    },
+    // 바람 탁구 · 핸디캡 탁구: 목표 점수 먼저
+    match: {
+      init: (g) => ({ sc: [0, 0], target: g.target, hc: '' }),
+      winner: (s) => firstTo(s.sc, s.target),
+      board: (s, g) => {
+        const w = TOOLS.match.winner(s);
+        return `${w ? banner(w.t) : `<span class="pill">${s.target}점 먼저 내면 승리</span>`}
+          <div class="bets">${[0, 1].map((t) => col(t, `<div class="amt">${s.sc[t]}</div><div class="row"><button class="btn ok" data-a="sc" data-v="${t}:1">＋1</button><button class="btn" data-a="sc" data-v="${t}:-1">−1</button></div>`)).join('')}</div>
+          ${g.handicap ? `<div class="hcap" id="hc">${s.hc ? '🍳 ' + esc(s.hc) : '<small>잘 치는 사람 차례에 🎲 핸디캡 뽑기!</small>'}</div>` : ''}`;
+      },
+      ctrls: (s, g) => `${g.handicap ? '<button class="btn big gold" data-a="hcap">🎲 핸디캡 뽑기</button>' : ''}
+        <div class="chips">${[3, 5, 7, 11].map((m) => `<button class="chip ${s.target === m ? 'on' : ''}" data-a="target" data-v="${m}">${m}점</button>`).join('')}</div>`,
+      acts: () => ({
+        sc: (v) => {
+          const [t, d] = v.split(':').map(Number);
+          if (d > 0 && TOOLS.match.winner(st)) return;
+          mut((s) => { s.sc[t] = Math.max(0, s.sc[t] + d); if (d > 0) { flash(t ? 'var(--B)' : 'var(--A)'); s.sc[t] >= s.target ? sfx.fanfare() : sfx.ok(); } else sfx.tick(); });
+        },
+        target: (v) => mut((s) => { s.target = Number(v); }),
+        hcap: () => {
+          clearTimeout(spinT); let k = 0;
+          const spin = () => {
+            const el = $('#hc'); if (!el) return;
+            if (k++ < 14) { el.textContent = '🎲 ' + pick(HANDICAPS); sfx.tick(); spinT = setTimeout(spin, 50 + k * 14); }
+            else mut((s) => { s.hc = pick(HANDICAPS.filter((h) => h !== s.hc)); sfx.fanfare(); });
+          };
+          spin();
+        },
+      }),
+    },
+    // 과녁 서브: 팀이 번갈아 한 명씩
+    serve: {
+      init: () => ({ sc: [0, 0], k: [0, 0], turn: 0, per: 1 }),
+      total: (s) => s.per * (roster ? Math.max(roster[0].length, roster[1].length, 1) : 5),
+      winner: (s) => { const T = TOOLS.serve.total(s); return s.k[0] >= T && s.k[1] >= T ? higher(s.sc) : null; },
+      board: (s) => {
+        const T = TOOLS.serve.total(s), w = TOOLS.serve.winner(s);
+        return `${w ? banner(w.t) : `<div class="notice" style="margin:0">🎯 서브: ${TN(s.turn)} · <b style="font-size:1.4em;color:var(--text)">${esc(who(s.turn, s.k[s.turn]))}</b></div>`}
+          <div class="bets">${[0, 1].map((t) => col(t, `<div class="amt">${s.sc[t]}</div>${muted(`서브 ${Math.min(s.k[t], T)} / ${T}`)}`)).join('')}</div>`;
+      },
+      ctrls: (s) => `${TOOLS.serve.winner(s) ? '' : `<div class="row">${[1, 3, 5].map((p) => `<button class="btn big ok" data-a="pt" data-v="${p}">+${p}</button>`).join('')}</div>
+        <button class="btn bad" data-a="pt" data-v="0">빗나감 (0점)</button>`}
+        <div class="chips">${[1, 2, 3].map((m) => `<button class="chip ${s.per === m ? 'on' : ''}" data-a="per" data-v="${m}">한 사람 ${m}번</button>`).join('')}</div>`,
+      acts: () => ({
+        pt: (v) => {
+          if (TOOLS.serve.winner(st)) return;
+          mut((s) => {
+            const p = Number(v), T = TOOLS.serve.total(s);
+            s.sc[s.turn] += p; s.k[s.turn]++; p ? sfx.ok() : sfx.bad();
+            if (s.k[1 - s.turn] < T) s.turn = 1 - s.turn;
+            if (TOOLS.serve.winner(s)) sfx.fanfare();
+          });
+        },
+        per: (v) => mut((s) => { s.per = Number(v); }),
+      }),
+    },
+    // 손 당구: 팀별 30초 동안 넣은 개수
+    timed: {
+      init: () => ({ sc: [0, 0], turn: 0, done: [false, false] }),
+      winner: (s) => (s.done[0] && s.done[1] ? higher(s.sc) : null),
+      board: (s, g) => {
+        const w = TOOLS.timed.winner(s);
+        const state = (t) => (s.done[t] ? '✅ 완료' : t === s.turn ? (running ? '🔥 진행 중' : '⏳ 다음 차례') : '대기');
+        return `${w ? banner(w.t) : `<div class="notice" style="margin:0">✋ ${TN(s.turn)} 차례 · 팀원이 돌아가며 굴리세요</div><div class="timer" id="tm">${running ? left : g.sec}</div>`}
+          <div class="bets">${[0, 1].map((t) => col(t, `<div class="amt">${s.sc[t]}</div>${muted(state(t))}`)).join('')}</div>`;
+      },
+      ctrls: (s, g) => (TOOLS.timed.winner(s) ? ''
+        : running ? '<button class="btn big ok" data-a="pot">🎱 넣었다 +1</button><button class="btn" data-a="unpot">−1 (잘못 누름)</button>'
+          : `<button class="btn big primary" data-a="start">▶ ${TN(s.turn)} ${g.sec}초 시작</button>`),
+      acts: (g) => ({
+        start: () => {
+          if (running || TOOLS.timed.winner(st)) return;
+          running = true; left = g.sec; sfx.go(); draw();
+          stopT = countdown(g.sec, (x) => {
+            left = x; const el = $('#tm');
+            if (el) { el.textContent = x; el.classList.toggle('warn', x <= 5); }
+            if (x <= 5 && x > 0) sfx.tick();
+          }, () => {
+            stopT = null; running = false; sfx.boom(); flash('#ff6b00');
+            mut((s) => { s.done[s.turn] = true; if (!s.done[1 - s.turn]) s.turn = 1 - s.turn; if (TOOLS.timed.winner(s)) sfx.fanfare(); });
+          });
+        },
+        pot: () => { if (running) mut((s) => { s.sc[s.turn]++; sfx.ok(); }); },
+        unpot: () => { if (running) mut((s) => { s.sc[s.turn] = Math.max(0, s.sc[s.turn] - 1); sfx.tick(); }); },
+      }),
+    },
+    // 당구 컬링: 라운드마다 가장 가깝게 멈춘 사람의 팀이 1승
+    curling: {
+      init: (g) => ({ wins: [0, 0], target: g.target, log: [] }),
+      winner: (s) => firstTo(s.wins, s.target),
+      board: (s) => {
+        const w = TOOLS.curling.winner(s);
+        const picker = roster
+          ? `<div class="ngrid">${names.map((n) => `<button class="nbtn${tc(n)}" data-a="win" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>`
+          : `<div class="row">${[0, 1].map((t) => `<button class="btn big ${t ? 'B' : 'A'}" data-a="win" data-v="#${t}">${TN(t)} 승</button>`).join('')}</div>`;
+        return `${w ? banner(w.t) : `<div class="notice" style="margin:0">🥌 ${s.log.length + 1}라운드: 가장 가깝게 멈춘 사람은?</div>${picker}`}
+          <div class="bets">${[0, 1].map((t) => col(t, `<div class="amt">${s.wins[t]}</div>${muted(`${s.target}승 먼저`)}`)).join('')}</div>
+          ${s.log.length ? `<div class="results">${s.log.map((x, i) => `<span class="o">${i + 1}R ${esc(x)}</span>`).join('')}</div>` : ''}`;
+      },
+      ctrls: (s) => `<div class="chips">${[2, 3, 5].map((m) => `<button class="chip ${s.target === m ? 'on' : ''}" data-a="target" data-v="${m}">${m}승 먼저</button>`).join('')}</div>`,
+      acts: () => ({
+        win: (v) => {
+          if (TOOLS.curling.winner(st)) return;
+          const t = v[0] === '#' ? Number(v.slice(1)) : teamOf(v);
+          if (t == null) return;
+          mut((s) => { s.wins[t]++; s.log.push(v[0] === '#' ? S.teams[t].name : v); flash(t ? 'var(--B)' : 'var(--A)'); TOOLS.curling.winner(s) ? sfx.fanfare() : sfx.ok(); });
+        },
+        target: (v) => mut((s) => { s.target = Number(v); }),
+      }),
+    },
+    // 릴레이 포켓볼: 팀원이 한 큐씩 순서대로
+    relay: {
+      init: () => ({ turn: 0, idx: [0, 0], win: null }),
+      winner: (s) => (s.win == null ? null : { t: s.win }),
+      board: (s) => {
+        const w = TOOLS.relay.winner(s);
+        const list = (t) => (roster && roster[t].length
+          ? `<div class="rlist">${roster[t].map((n, i) => `<span class="${i === s.idx[t] % roster[t].length ? 'now' : ''}">${esc(n)}</span>`).join('')}</div>`
+          : muted(`다음: ${who(t, s.idx[t])}`));
+        return `${w ? banner(w.t) : `${muted('🎱 지금 칠 사람')}<div class="slot ${s.turn ? 'B' : 'A'}">${esc(who(s.turn, s.idx[s.turn]))}</div>`}
+          <div class="bets">${[0, 1].map((t) => col(t, list(t))).join('')}</div>`;
+      },
+      ctrls: (s) => (s.win != null ? '' : `<div class="row"><button class="btn big ok" data-a="pot">⭕ 넣음</button><button class="btn big bad" data-a="miss">❌ 못 넣음</button></div>
+        ${muted('넣으면 같은 팀 다음 사람, 못 넣으면 상대 팀 차례')}
+        <div class="row">${[0, 1].map((t) => `<button class="btn ${t ? 'B' : 'A'}" data-a="win" data-v="${t}">🏆 ${TN(t)} 승리</button>`).join('')}</div>`),
+      acts: () => ({
+        pot: () => { if (st.win == null) mut((s) => { s.idx[s.turn]++; sfx.ok(); }); },
+        miss: () => { if (st.win == null) mut((s) => { s.idx[s.turn]++; s.turn = 1 - s.turn; sfx.bad(); }); },
+        win: (v) => mut((s) => { s.win = Number(v); sfx.fanfare(); flash('var(--gold)'); }),
+      }),
+    },
+  };
+
+  // ── 목록 ──
+  function menu() {
+    stopTimer();
+    const grp = (tb, title) => `<div class="tgrp">${title}</div>
+      <div class="grid">${TABLE_GAMES.filter((g) => g.tb === tb).map((g) => `<button class="card" data-a="open" data-v="${g.key}"><span class="ic">${g.ic}</span><span class="t">${g.t}</span><span class="d">${S.tbl[g.key] ? '▶ 이어서' : g.d}</span></button>`).join('')}</div>`;
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🏓 탁구·당구 대항전</h2><span class="sub">${roster ? '팀 명단 연결됨 · 이긴 팀 보너스는 위 점수판에 합산' : '🎲 팀 나누기를 먼저 하면 이름과 팀이 자동으로 들어가요'}</span></div>
+        ${grp('ping', '🏓 탁구대')}
+        ${grp('pool', '🎱 당구대')}
+      </div>`;
+    actions = { open: (k) => open(k) };
+  }
+
+  function open(k) {
+    stopTimer();
+    G = TABLE_GAMES.find((g) => g.key === k); tool = TOOLS[G.tool];
+    rulesOn = !S.tbl[k]; st = S.tbl[k] || tool.init(G); hist = [];
+    draw();
+  }
+
+  function awardRow(w) {
+    const pts = st.pts || G.prize, done = st.awarded != null;
+    return `<div class="row"><span class="sub" style="color:var(--muted)">🏆 이긴 팀 보너스</span><button class="chip" data-a="pts" ${done ? 'disabled' : ''}>+${pts}점 🔄</button></div>
+      <div class="row">${[0, 1].map((t) => `<button class="btn ${t ? 'B' : 'A'}${w.t === t ? ' on' : ''}" data-a="award" data-v="${t}" ${done ? 'disabled' : ''}>${done && st.awarded === t ? '✅ ' : ''}${TN(t)} +${pts}</button>`).join('')}</div>
+      ${done ? '<button class="btn gold" data-a="roulette">🎰 진 팀 벌칙 룰렛</button>' : ''}`;
+  }
+
+  function draw() {
+    const w = rulesOn ? null : tool.winner(st);
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>${G.ic} ${G.t}</h2><span class="pill">${G.tb === 'ping' ? '🏓 탁구대' : '🎱 당구대'}</span></div>
+        <div class="stage-wrap">
+          <div class="stage${rulesOn ? ' scroll' : ''}">${rulesOn
+            ? `<div class="rulecard"><div class="rt">${G.ic} ${G.t}</div><ol>${G.rules.map((r) => `<li>${r}</li>`).join('')}</ol></div>`
+            : tool.board(st, G)}</div>
+          <div class="controls">
+            ${rulesOn ? '<button class="btn big primary" data-a="play">▶ 시작</button>' : tool.ctrls(st, G)}
+            ${w ? awardRow(w) : ''}
+            <div class="row tbar">
+              ${rulesOn ? '' : '<button class="btn" data-a="rules">📖 규칙</button>'}
+              ${!rulesOn && hist.length ? '<button class="btn" data-a="undo">↩️ 취소</button>' : ''}
+              ${rulesOn ? '' : '<button class="btn" data-a="reset">🔁 새 판</button>'}
+              <button class="btn" data-a="menu">☰ 목록</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    actions = Object.assign({
+      play: () => { rulesOn = false; persist(); sfx.go(); draw(); },
+      rules: () => { if (running) { toast('타이머가 끝난 뒤에 볼 수 있어요'); return; } rulesOn = true; draw(); },
+      undo: () => {
+        if (running || !hist.length) return;
+        const had = st.awarded != null;
+        st = JSON.parse(hist.pop()); persist(); sfx.tick(); draw();
+        if (had && st.awarded == null) toast('이미 준 보너스 점수는 위 점수판 −/＋로 고쳐 주세요', 3500);
+      },
+      // 새 판도 되돌리기 기록에 남겨서 실수로 눌러도 복구 가능
+      reset: () => { stopTimer(); mut((s) => { const keep = s.pts; st = tool.init(G); if (keep) st.pts = keep; sfx.beep(); toast('새 판! 잘못 눌렀으면 ↩️ 취소'); }); },
+      menu: () => menu(),
+      toTeams: () => go('teams'),
+      pts: () => { const P = [1, 2, 3, 5], cur = st.pts || G.prize; st.pts = P[(P.indexOf(cur) + 1) % P.length]; persist(); sfx.tick(); draw(); },
+      award: (v) => {
+        if (st.awarded != null) return;
+        const t = Number(v), pts = st.pts || G.prize;
+        addScore(t, pts); st.awarded = t; persist(); sfx.fanfare(); flash('var(--gold)');
+        toast(`${S.teams[t].name} +${pts}점! 점수판에 반영했어요`); draw();
+      },
+      roulette: () => go('roulette'),
+    }, tool.acts(G));
+  }
+
+  menu();
 };
 
 // ── 🕵️ 마피아 (사회자 진행) ──
