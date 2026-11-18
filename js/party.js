@@ -41,6 +41,30 @@ const NET = {
   },
 };
 
+// ── 접속 QR 블록: ⚙️ 설정에 핫스팟 Wi-Fi를 넣어 두면 "① Wi-Fi QR → ② 게임 QR"을 나란히 보여 줌 ──
+// Wi-Fi QR은 폰 기본 카메라로 찍으면 비밀번호 입력 없이 바로 그 Wi-Fi에 연결됩니다 (아이폰 iOS 11+, 안드로이드 10+).
+const wifiEsc = (s) => String(s).replace(/([\\;,:"])/g, '\\$1');
+function wifiQrText(w) {
+  return `WIFI:T:${w.pass ? 'WPA' : 'nopass'};S:${wifiEsc(w.ssid)};${w.pass ? `P:${wifiEsc(w.pass)};` : ''};`;
+}
+// 접속 안내 문구: Wi-Fi QR이 있으면 순서를 알려 줌
+function joinHint(what) {
+  return S.wifi && S.wifi.ssid ? `📱 ① Wi-Fi QR로 연결한 뒤<br>② 게임 QR을 찍고 ${what}` : `📱 같은 Wi-Fi(또는 핫스팟)에서<br>QR을 찍고 ${what}`;
+}
+function qrBlock(url, maxH = '70%') {
+  const qr = NET.qr(url), w = S.wifi && S.wifi.ssid ? S.wifi : null;
+  if (!w) {
+    return `${qr ? `<div class="qr" style="max-height:${maxH}">${qr}</div>` : ''}
+      <div class="pill" style="font-size:clamp(16px,3.4vmin,26px);word-break:break-all">${esc(url)}</div>`;
+  }
+  return `<div class="qrpair">
+      <div class="qritem"><div class="qstep">① Wi-Fi 연결</div><div class="qbox"><div class="qr">${NET.qr(wifiQrText(w))}</div></div>
+        <div class="qcap">📶 ${esc(w.ssid)}${w.pass ? `<br>🔑 ${esc(w.pass)}` : ''}</div></div>
+      <div class="qritem"><div class="qstep">② 게임 접속</div><div class="qbox"><div class="qr">${qr}</div></div>
+        <div class="qcap">${esc(url)}</div></div>
+    </div>`;
+}
+
 // ── 명단형 게임(라이어)의 접속 화면: QR + 이름별 접속 상태 + 잠금 풀기 ──
 // o = { kind: 'l', code, names, ht, title, mid, register(), onStart(), onBack(), onSetup() }
 async function rosterJoinScreen(o) {
@@ -56,7 +80,7 @@ async function rosterJoinScreen(o) {
     actions = { retry: () => rosterJoinScreen(o), setup: () => o.onSetup() };
     return;
   }
-  const url = `${NET.origin()}/player.html?s=${o.code}&t=${o.kind}`, qr = NET.qr(url);
+  const url = `${NET.origin()}/player.html?s=${o.code}&t=${o.kind}`;
   let st = { claimed: o.names.map(() => false), online: o.names.map(() => false) };
   const who = () => o.names.map((nm, k) => {
     const tag = st.online[k] ? '✅' : st.claimed[k] ? '🟡' : '⬜';
@@ -68,12 +92,11 @@ async function rosterJoinScreen(o) {
       <div class="head"><h2>📡 ${esc(o.title)}</h2><span class="pill" id="cnt">${count()}</span></div>
       <div class="stage-wrap">
         <div class="stage" style="gap:8px">
-          ${qr ? `<div class="qr" style="max-height:62%">${qr}</div>` : ''}
-          <div class="pill" style="font-size:clamp(16px,3.4vmin,26px);word-break:break-all">${esc(url)}</div>
+          ${qrBlock(url, '62%')}
           <div class="ngrid" id="who">${who()}</div>
         </div>
         <div class="controls">
-          <p class="notice" style="margin:0;text-align:center">📱 같은 Wi-Fi(또는 노트북 핫스팟)에서<br>QR을 찍고 자기 이름을 누르세요</p>
+          <p class="notice" style="margin:0;text-align:center">${joinHint('자기 이름을 누르세요')}</p>
           <p class="sub" style="margin:0;text-align:center;color:var(--muted)">✅ 접속 중 · 🟡 화면 꺼짐 · ⬜ 아직<br>이름을 잘못 골랐으면 그 이름을 눌러 풀어 주세요.</p>
           ${NET.canSwitchIp() ? '<button class="btn" data-a="ip">🌐 다른 주소로 바꾸기 (폰이 안 들어올 때)</button>' : ''}
           ${o.mid ? '<button class="btn big primary" data-a="back">↩ 게임으로 돌아가기</button>'
@@ -211,7 +234,7 @@ function phonesScreen() {
       actions = { retry: () => phonesScreen(), home: () => go('home') };
       return;
     }
-    const url = `${NET.origin()}/play.html`, qr = NET.qr(url);
+    const url = `${NET.origin()}/play.html`;
     const list = () => [0, 1].map((t) => `
       <div class="tcol ${t ? 'B' : 'A'}" style="min-height:0">
         <div class="tname">${esc(S.teams[t].name)} <small>${Party.members(t).length}명</small></div>
@@ -222,12 +245,11 @@ function phonesScreen() {
         <div class="head"><h2>📱 폰 연결</h2><span class="sub">버저·폭탄·캐치마인드·올인을 폰으로</span></div>
         <div class="stage-wrap">
           <div class="stage" style="gap:8px">
-            ${qr ? `<div class="qr" style="max-height:70%">${qr}</div>` : ''}
-            <div class="pill" style="font-size:clamp(16px,3.4vmin,26px);word-break:break-all">${esc(url)}</div>
+            ${qrBlock(url, '70%')}
           </div>
           <div class="controls">
-            <p class="notice" style="margin:0;text-align:center">📱 QR을 찍고 이름과 팀을 고르세요<br>한 번만 하면 행사 내내 쓸 수 있어요</p>
-            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${S.roster ? '팀 나누기 결과대로 이름만 고르면 됩니다.' : '팀 나누기를 먼저 하면 이름만 고르면 돼요.'} 이름을 누르면 접속을 끊을 수 있어요.</p>
+            <p class="notice" style="margin:0;text-align:center">${joinHint('이름과 팀을 고르세요')}</p>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">한 번만 하면 행사 내내 써요. ${S.roster ? '팀 나누기 결과대로 이름만 고르면 됩니다.' : '팀 나누기를 먼저 하면 이름만 고르면 돼요.'} 이름을 누르면 접속을 끊을 수 있어요.</p>
             <div class="tboard" id="plist" style="flex:1;min-height:0;overflow:auto">${list()}</div>
             ${NET.canSwitchIp() ? '<button class="btn" data-a="ip">🌐 다른 주소로 바꾸기</button>' : ''}
             <button class="btn big primary" data-a="home">🏠 홈으로</button>

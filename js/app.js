@@ -1675,7 +1675,6 @@ screens.mafia = () => {
     const ipi = Math.min(M.ipi || 0, Math.max(0, ips.length - 1));
     const origin = local && ips.length ? `http://${ips[ipi]}:${location.port || 80}` : location.origin;
     const url = `${origin}/player.html?s=${M.g.c}`;
-    const qr = qrSvg(url);
     let st = { claimed: M.g.n.map(() => false), online: M.g.n.map(() => false) };
     const who = () => M.g.n.map((nm, k) => {
       const tag = st.online[k] ? '✅' : st.claimed[k] ? '🟡' : '⬜';
@@ -1687,12 +1686,11 @@ screens.mafia = () => {
         <div class="head"><h2>📡 ${mid ? '접속 관리' : '역할 확인'}</h2><span class="pill" id="cnt">${count()}</span></div>
         <div class="stage-wrap">
           <div class="stage" style="gap:8px">
-            ${qr ? `<div class="qr" style="max-height:62%">${qr}</div>` : ''}
-            <div class="pill" style="font-size:clamp(16px,3.4vmin,26px);word-break:break-all">${esc(url)}</div>
+            ${qrBlock(url, '62%')}
             <div class="ngrid" id="who">${who()}</div>
           </div>
           <div class="controls">
-            <p class="notice" style="margin:0;text-align:center">📱 같은 Wi-Fi(또는 노트북 핫스팟)에서<br>QR을 찍고 자기 이름을 누르세요</p>
+            <p class="notice" style="margin:0;text-align:center">${joinHint('자기 이름을 누르세요')}</p>
             <p class="sub" style="margin:0;text-align:center;color:var(--muted)">✅ 접속 중 · 🟡 화면 꺼짐 · ⬜ 아직<br>이름을 잘못 골랐으면 그 이름을 눌러 풀어 주세요.</p>
             ${ips.length > 1 && local ? '<button class="btn" data-a="ip">🌐 다른 주소로 바꾸기 (폰이 안 들어올 때)</button>' : ''}
             ${mid ? '<button class="btn big primary" data-a="back">↩ 낮으로 돌아가기</button>'
@@ -2243,6 +2241,11 @@ screens.settings = () => {
           <input id="set" type="number" min="1" max="999" inputmode="numeric" value="${S.set}" style="max-width:120px">
           <a class="btn gold" href="answers.html?set=${S.set}" target="_blank" rel="noopener" style="text-decoration:none">📋 정답지 열기</a>
         </div>
+        <label>📶 핫스팟 Wi-Fi (노트북 서버용: 접속 화면에 Wi-Fi QR이 함께 떠서 찍기만 하면 연결돼요. 비워 두면 안 나옴)</label>
+        <div class="row" style="flex-wrap:nowrap">
+          <input id="ssid" value="${esc((S.wifi && S.wifi.ssid) || '')}" placeholder="Wi-Fi 이름 (대소문자·띄어쓰기 그대로)" autocomplete="off" spellcheck="false">
+          <input id="wpass" value="${esc((S.wifi && S.wifi.pass) || '')}" placeholder="비밀번호" autocomplete="off" spellcheck="false">
+        </div>
         <label>벌칙 룰렛 항목 (한 줄에 하나)</label>
         <textarea id="pen">${esc(S.penalties.join('\n'))}</textarea>
         <div class="row">
@@ -2258,6 +2261,8 @@ screens.settings = () => {
       S.teams[1].name = $('#n1').value.trim() || 'B팀';
       S.penalties = $('#pen').value.split('\n').map((s) => s.trim()).filter(Boolean);
       S.set = Math.max(1, parseInt($('#set').value, 10) || 1);
+      const ssid = $('#ssid').value.trim();
+      S.wifi = ssid ? { ssid, pass: $('#wpass').value } : null;
       document.querySelector('a[href^="answers.html"]').href = 'answers.html?set=' + S.set;
       save(); renderScore(); sfx.ok(); toast('저장했어요');
     },
