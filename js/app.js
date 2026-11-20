@@ -64,10 +64,11 @@ function renderScore() {
   $('#scorebar').innerHTML = t(0, 'A') + '<span class="mid"><button class="home-btn" data-home title="홈">🏠</button><button class="home-btn" data-scores title="점수판 · 개인 점수">🏅</button></span>' + t(1, 'B');
 }
 // ask = false 면 "누가 맞혔나요?"를 묻지 않음 (점수판 화면의 팀 점수 수정 등)
+let remoteClick = false; // 사회자 폰이 버튼을 대신 누르는 중 (누가 맞혔는지는 폰에서 이미 고름)
 function addScore(i, n, ask = true) {
   S.teams[i].score += n; save(); renderScore();
   const el = $('#pts' + i); el.classList.add('bump'); setTimeout(() => el.classList.remove('bump'), 250);
-  if (n > 0 && ask) askWho(i, n);
+  if (n > 0 && ask && !remoteClick) askWho(i, n);
   pushScores();
 }
 $('#scorebar').addEventListener('click', (e) => {
@@ -170,7 +171,21 @@ function go(name, ...args) {
   actions = {};
   stopClip();
   main.scrollTop = 0;
+  const g = GAMES.find((x) => x.key === name);
+  CTL = { title: g ? `${g.ic} ${g.t}` : (SCREEN_NAMES[name] || name), can: [] }; // 화면이 render 때 setCtl로 채움
   screens[name](...args);
+  pushCtl();
+}
+
+// ── 🎤 사회자 폰 진행 버튼 ──
+// 각 화면이 "지금 누를 수 있는 버튼 + 현재 정답"을 setCtl로 알려 주면 사회자 폰에만 보냄 (참가자 폰에는 안 감)
+// can: [{ a: data-a, v: data-v, l: 버튼 글자, k: 'big' 등 }], win: { pts } 이면 팀 정답 버튼, answer/detail: 정답
+const SCREEN_NAMES = { home: '🏠 홈', sound: '🔊 사운드 준비', settings: '⚙️ 설정', scores: '🏅 점수판', awards: '🏆 시상식', phones: '📱 폰 연결', remote: '🎤 사회자 폰 연결' };
+let CTL = null, ctlT = null;
+function setCtl(c) { CTL = { title: CTL ? CTL.title : '', can: [], ...c }; pushCtl(); }
+function pushCtl() {
+  clearTimeout(ctlT);
+  ctlT = setTimeout(() => { if (typeof Party !== 'undefined' && S.partyHt && NET.info) Party.act('ctl', { ctl: CTL }); }, 150);
 }
 main.addEventListener('click', (e) => {
   const el = e.target.closest('[data-a]'); if (!el) return;
@@ -417,6 +432,17 @@ screens.music = (kind = 'music') => {
           </div>
         </div>
       </div>`;
+    setCtl({
+      q: `Q ${i + 1}${filter ? ` · ${filter}` : ''}`, answer: Q.answer(s), detail: Q.detail(s), revealed,
+      win: revealed ? null : { pts: 1 },
+      can: [
+        { a: 'clip', v: '1', l: '1초' }, { a: 'clip', v: '3', l: '3초' }, { a: 'clip', v: '5', l: '5초' }, { a: 'clip', v: '10', l: '10초' },
+        { a: 'full', l: '▶ 계속 듣기' }, { a: 'stop', l: '■ 정지' },
+        ...(hint < Q.hints.length ? [{ a: 'hint', l: '💡 ' + Q.hints[hint].label }] : []),
+        { a: 'reveal', l: '👀 정답 공개' },
+        ...(i > 0 ? [{ a: 'prev', l: '◀ 이전' }] : []), { a: 'next', l: '다음 ▶', k: 'big' },
+      ],
+    });
   }
   const setProg = (p) => { const el = $('#prog'); if (el) el.style.width = (p * 100) + '%'; };
   onYtPlaying = (on) => { playing = on; const d = $('#disc'); if (d) d.classList.toggle('spin', on); };
@@ -708,6 +734,15 @@ screens.chosung = () => {
           </div>
         </div>
       </div>`;
+    setCtl({
+      q: `${cat} · Q${i + 1}`, answer: q.w, detail: q.c, revealed,
+      win: revealed ? null : { pts: pts() },
+      can: [
+        { a: 'timer', l: '⏱ 10초' },
+        ...(!revealed && keep < maxKeep ? [{ a: 'more', l: '💡 한 글자 공개' }] : []),
+        { a: 'reveal', l: '👀 정답 공개' }, { a: 'next', l: '다음 ▶', k: 'big' },
+      ],
+    });
   }
   const stopT = () => { if (stopTimer) { stopTimer(); stopTimer = null; } };
   const show = () => { stopT(); revealed = true; markDone(pool[i].w); save(); render(); };
@@ -784,6 +819,15 @@ screens.photo = () => {
           </div>
         </div>
       </div>`;
+    setCtl({
+      q: `Q${i + 1} · ${revealed ? '정답!' : `${stage + 1}단계`}`, answer: c.name, revealed,
+      win: revealed ? null : { pts: POINTS[stage] },
+      can: [
+        ...(stage < 3 && !revealed ? [{ a: 'zoom', l: `🔍 줌 아웃 (${POINTS[stage + 1]}점으로)` }] : []),
+        { a: 'reveal', l: '👀 정답 공개' },
+        ...(i > 0 ? [{ a: 'prev', l: '◀ 이전' }] : []), { a: 'next', l: '다음 ▶', k: 'big' },
+      ],
+    });
   }
   // 다음은 안 푼 사진으로 건너뛰고, 이전은 바로 앞 사진
   const move = (to) => { i = to; stage = 0; revealed = false; savePos(); render(); preload(nextOpen(i + 1, true)); Party.buzzReset(); };
@@ -836,6 +880,8 @@ screens.charades = () => {
       secs: (v) => { secs = Number(v); setup(); }, team: (v) => { team = Number(v); setup(); },
       start: () => play(),
     };
+    setCtl({ q: `${S.teams[team].name} 차례 · ${cat}`, can: [
+      { a: 'team', v: '0', l: `${S.teams[0].name} 차례` }, { a: 'team', v: '1', l: `${S.teams[1].name} 차례` }, { a: 'start', l: '▶ 시작!', k: 'big' }] });
   }
 
   function play() {
@@ -862,6 +908,8 @@ screens.charades = () => {
             </div>
           </div>
         </div>`;
+      setCtl({ q: `${S.teams[team].name} · ⭕ ${ok}개`, answer: running ? (word || '제시어 소진') : '', can: [
+        { a: 'ok', l: '⭕ 정답', k: 'big' }, { a: 'pass', l: '⏭ 패스' }, { a: 'quit', l: '그만하기' }] });
     }
     function finish() {
       running = false; sfx.boom(); flash('var(--bad)');
@@ -878,10 +926,13 @@ screens.charades = () => {
             </div>
           </div>
         </div>`;
+      const ctlEnd = (applied) => setCtl({ q: `${S.teams[team].name} · ${ok}개 정답`, can: [
+        ...(applied ? [] : [{ a: 'apply', l: `${S.teams[team].name}에 +${ok}점 반영`, k: 'big' }]), { a: 'again', l: '다음 라운드' }] });
       actions = {
-        apply: (v, el) => { addScore(team, ok); sfx.fanfare(); el.disabled = true; el.textContent = '✅ 반영 완료'; },
+        apply: (v, el) => { addScore(team, ok); sfx.fanfare(); el.disabled = true; el.textContent = '✅ 반영 완료'; ctlEnd(true); },
         again: () => { team = 1 - team; setup(); },
       };
+      ctlEnd(false);
     }
     // 3-2-1 카운트다운 후 시작
     render();
@@ -1303,6 +1354,7 @@ screens.roulette = () => {
         </div>
       </div>
     </div>`;
+  setCtl({ can: [{ a: 'spin', l: '🎰 돌려!', k: 'big' }] });
   const cv = $('#wh'), ctx = cv.getContext('2d');
   function draw() {
     const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, size = Math.min(r.width, r.height);
@@ -2662,10 +2714,27 @@ function onRemote(v) {
   } else if (v.op === 'indiv' && v.who[0]) {
     addIndiv(v.who[0], v.team, v.n); rlog.push(v); sfx.tick();
     toast(`🎤 ${v.who[0]} ${v.n > 0 ? '+' : ''}${v.n}점`);
+  } else if (v.op === 'act') {
+    // 진행 화면의 실제 버튼을 대신 누름 → 점수·효과음·비활성 상태가 직접 누를 때와 똑같이 동작
+    const sel = `[data-a="${CSS.escape(v.a)}"]` + (v.v ? `[data-v="${CSS.escape(v.v)}"]` : '');
+    const btn = main.querySelector(sel);
+    if (!btn || btn.disabled) { toast('🎤 지금 화면에서는 누를 수 없는 버튼이에요'); pushCtl(); return; }
+    const before = S.teams.map((t) => t.score);
+    remoteClick = true;
+    try { btn.click(); } finally { remoteClick = false; }
+    const d = S.teams.map((t, k) => t.score - before[k]);
+    const who = v.a === 'win' ? v.who : [];
+    who.forEach((nm) => addIndiv(nm, v.team, v.ip));
+    if (d.some(Boolean) || who.length) {
+      rlog.push({ op: 'delta', d, who, team: v.team, ip: v.ip });
+      const got = d.map((x, k) => (x ? `${S.teams[k].name} ${x > 0 ? '+' : ''}${x}점` : '')).filter(Boolean).join(' · ');
+      toast(`🎤 ${got}${who.length ? ` · ${who.length > 3 ? '팀 전원' : who.join(', ')} +${v.ip}` : ''}`);
+    }
   } else if (v.op === 'undo') {
     const x = rlog.pop();
     if (!x) { toast('🎤 취소할 점수가 없어요'); return; }
     if (x.op === 'team') { addScore(x.team, -x.n, false); x.who.forEach((nm) => addIndiv(nm, x.team, -x.ip)); }
+    else if (x.op === 'delta') { x.d.forEach((n, k) => { if (n) addScore(k, -n, false); }); x.who.forEach((nm) => addIndiv(nm, x.team, -x.ip)); }
     else addIndiv(x.who[0], x.team, -x.n);
     sfx.tick(); toast('🎤 방금 준 점수를 취소했어요');
   }

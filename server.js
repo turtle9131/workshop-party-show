@@ -198,7 +198,17 @@ function cleanScores(s) {
 }
 // 🎤 사회자 리모컨(host.html): 전체 점수(공개 범위와 무관) + 진행 화면 연결 여부
 const hostOnline = () => [...P.subs].some((s) => s.host);
-function remoteView() { return { t: 'rstate', scores: P.scores || null, host: hostOnline(), teamNames: P.teamNames }; }
+function remoteView() { return { t: 'rstate', scores: P.scores || null, ctl: P.ctl || null, host: hostOnline(), teamNames: P.teamNames }; }
+// 진행 화면이 알려 주는 "지금 화면에서 누를 수 있는 버튼 + 정답" (사회자 폰 전용)
+function cleanCtl(c) {
+  if (!c || typeof c !== 'object') return null;
+  const str = (x, n) => String(x == null ? '' : x).slice(0, n);
+  return {
+    title: str(c.title, 40), q: str(c.q, 40), answer: str(c.answer, 80), detail: str(c.detail, 80), revealed: !!c.revealed,
+    win: c.win && Number.isFinite(+c.win.pts) ? { pts: Math.round(+c.win.pts) } : null,
+    can: (Array.isArray(c.can) ? c.can : []).slice(0, 16).map((b) => ({ a: str(b && b.a, 20), v: str(b && b.v, 20), l: str(b && b.l, 30), k: str(b && b.k, 10) })),
+  };
+}
 function pBroadcast() {
   if (!P) return;
   for (const s of P.subs) {
@@ -401,13 +411,14 @@ async function partyApi(route, req, res, q) {
   if (route === 'remote') {
     if (!P.rk || b.rk !== P.rk) return json(res, 403, { error: 'auth' });
     if (!hostOnline()) return json(res, 409, { error: 'nohost' });
-    const op = ['team', 'indiv', 'undo'].includes(b.op) ? b.op : null;
+    const op = ['team', 'indiv', 'undo', 'act'].includes(b.op) ? b.op : null;
     if (!op) return json(res, 400, { error: 'op' });
     const n = Math.max(-20, Math.min(20, Math.round(+b.n) || 0));
     pHosts({
       t: 'remote', op, team: b.team === 1 ? 1 : 0, n,
       who: Array.isArray(b.who) ? b.who.slice(0, 40).map((x) => String(x).slice(0, 20)) : [],
       ip: Math.max(0, Math.min(10, Math.round(+b.ip) || 0)),
+      a: String(b.a || '').slice(0, 20), v: String(b.v == null ? '' : b.v).slice(0, 20),
     });
     return json(res, 200, { ok: true });
   }
@@ -494,6 +505,7 @@ async function partyApi(route, req, res, q) {
     else if (op === 'allin') P.act = { kind: 'allin', open: true, answers: { 0: null, 1: null } };
     else if (op === 'allinClose') { if (a.kind === 'allin') a.open = false; }
     else if (op === 'score') P.scores = cleanScores(b.scores);
+    else if (op === 'ctl') { P.ctl = cleanCtl(b.ctl); for (const s of P.subs) if (s.remote) send(s, remoteView()); return json(res, 200, { ok: true }); }
     else return json(res, 400, { error: 'op' });
     pBroadcast();
     return json(res, 200, { ok: true, act: partyHostView().act });
