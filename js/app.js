@@ -224,6 +224,8 @@ window.onYouTubeIframeAPIReady = function () {
       onReady: () => { ytReady = true; },
       onStateChange: (e) => {
         if (e.data === YT.PlayerState.PLAYING) {
+          // YouTube 자동 자막이 대사(정답)를 미리 보여 주지 않도록 자막을 끔
+          try { yt.unloadModule('captions'); yt.unloadModule('cc'); } catch (err) { /* 자막 없음 */ }
           if (!ytUnlocked) { ytUnlocked = true; if ($('#yt-wrap').classList.contains('yt-setup')) { sfx.ok(); toast('🔊 소리 준비 완료! 아래 [완료]를 눌러주세요'); } }
           if (onYtPlaying) onYtPlaying(true);
         } else if (onYtPlaying) onYtPlaying(false);
