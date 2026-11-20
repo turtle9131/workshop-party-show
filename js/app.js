@@ -286,6 +286,7 @@ const GAMES = [
   { key: 'ost', ic: '🎬', t: 'OST 퀴즈', d: '드라마·영화 맞히기' },
   { key: 'chosung', ic: '🔤', t: '초성 퀴즈', d: 'ㅇㅈㅇ ㄱㅇ?' },
   { key: 'photo', ic: '📸', t: '확대 사진 퀴즈', d: '이 얼굴 누구게?' },
+  { key: 'scene', ic: '📺', t: '다음 장면 맞히기', d: '영상 보고 예측' },
   { key: 'charades', ic: '🎭', t: '몸으로 말해요', d: '고요 속의 외침' },
   // 이번 워크샵에서는 빼기로 함 (코드는 남아 있어서 아래 줄 주석만 풀면 다시 나옴)
   // { key: 'draw', ic: '🎨', t: '캐치마인드', d: '릴레이 그림 퀴즈' },
@@ -845,6 +846,214 @@ screens.photo = () => {
   };
   Party.buzzer();
   render(); preload(nextOpen(i + 1, true));
+};
+
+// ── 📺 다음 장면 맞히기 ──
+// 기본 영상(SCENES, 국내 먼저) + 진행 화면에서 직접 추가한 영상(S.myScenes)
+const allScenes = () => [...SCENES, ...(Array.isArray(S.myScenes) ? S.myScenes : [])];
+const sceneKey = (s) => s.id + ':' + s.stop;
+// YouTube 주소에서 영상 ID 뽑기 (watch?v= · youtu.be/ · shorts/ · ID 그대로)
+function ytId(txt) {
+  const t = String(txt || '').trim();
+  const m = t.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([\w-]{11})/) || t.match(/^([\w-]{11})$/);
+  return m ? m[1] : null;
+}
+// 숨겨 둔 YouTube 플레이어를 무대(#sbox) 위에 보이게 띄움. 위쪽(영상 제목이 뜨는 곳)은 가리개로 덮음
+function stagePlayer() {
+  const wrap = $('#yt-wrap');
+  if (!wrap.querySelector('.yt-cover')) wrap.insertAdjacentHTML('beforeend', '<div class="yt-cover top"></div><div class="yt-cover bot"></div>');
+  const place = () => {
+    const box = $('#sbox'); if (!box) return;
+    const r = box.getBoundingClientRect();
+    Object.assign(wrap.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+  };
+  wrap.classList.remove('yt-hidden'); wrap.classList.add('yt-scene');
+  window.addEventListener('resize', place);
+  onCleanup(() => {
+    window.removeEventListener('resize', place);
+    wrap.classList.remove('yt-scene', 'paused'); wrap.classList.add('yt-hidden');
+    ['left', 'top', 'width', 'height', 'visibility'].forEach((k) => { wrap.style[k] = ''; });
+  });
+  return { wrap, place: () => { requestAnimationFrame(place); place(); } };
+}
+
+screens.scene = () => {
+  const POINTS = 2, L = ['①', '②', '③'];
+  const list = allScenes();
+  if (!S.quizPos) S.quizPos = {};
+  if (!S.quizDone) S.quizDone = {};
+  const key = () => 'scene:' + S.set;
+  const done = () => new Set(S.quizDone[key()] || []);
+  let i = 0, phase = 'ready', won = [false, false], stopT = null;
+  const cur = () => list[i];
+  const markDone = () => { const a = S.quizDone[key()] || (S.quizDone[key()] = []); if (!a.includes(sceneKey(cur()))) a.push(sceneKey(cur())); save(); };
+  const savePos = () => { S.quizPos[key()] = i; save(); };
+  const leftCount = () => { const d = done(); return list.filter((x) => !d.has(sceneKey(x))).length; };
+  function nextOpen(from) {
+    const d = done();
+    for (let k = 0; k < list.length; k++) { const j = (from + k) % list.length; if (!d.has(sceneKey(list[j]))) return j; }
+    toast('영상을 모두 풀었어요. [↺]로 처음부터 다시 할 수 있어요', 3500);
+    return from % list.length;
+  }
+  i = nextOpen(Math.min(S.quizPos[key()] || 0, list.length - 1)); savePos();
+
+  const { wrap, place } = stagePlayer();
+  onCleanup(() => { if (stopT) stopT(); });
+  const clip = (from, to, onEnd) => {
+    let ended = false;
+    wrap.classList.remove('paused');
+    playClip({ id: cur().id, start: from }, to - from, (p) => { if (p >= 1 && !ended) { ended = true; wrap.classList.add('paused'); if (onEnd) onEnd(); } });
+  };
+
+  function render() {
+    const s = cur(), showQ = phase !== 'ready' && phase !== 'playing';
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>📺 다음 장면 맞히기</h2><span class="pill">Q${i + 1} / ${list.length} · 남은 ${leftCount()} · 맞히면 +${POINTS}</span></div>
+        <div class="stage-wrap">
+          <div class="stage" style="gap:8px">
+            <div class="scene-box" id="sbox">${phase === 'ready' ? '<div class="scene-wait">▶ 재생을 누르면 영상이 나와요</div>' : ''}</div>
+            <div class="scene-q">${showQ ? `⏸ ${esc(s.q)}` : phase === 'playing' ? '👀 잘 보세요! 결정적 순간에 멈춥니다' : esc(s.q)}</div>
+          </div>
+          <div class="controls">
+            ${showQ ? `<div class="scene-opts">${s.opts.map((o, k) => `<div class="sopt ${phase === 'revealed' ? (k === s.a ? 'ok' : 'no') : ''}"><b>${L[k]}</b> ${esc(o)}</div>`).join('')}</div>` : ''}
+            <div class="timer" id="tm" style="text-align:center;font-size:clamp(22px,6vmin,44px)"></div>
+            <div class="row">
+              ${phase === 'ready' ? '<button class="btn big primary" data-a="play">▶ 재생</button>' : ''}
+              ${phase === 'question' ? '<button class="btn" data-a="replay">🔁 다시 보기</button><button class="btn primary" data-a="timer">⏱ 10초</button>' : ''}
+              ${phase === 'question' ? '<button class="btn gold" data-a="reveal">👀 정답 공개</button>' : ''}
+              ${phase === 'revealed' ? '<button class="btn" data-a="again">🔁 정답 장면 다시</button>' : ''}
+            </div>
+            ${showQ ? `<div class="row">${[0, 1].map((t) => `<button class="btn ${t ? 'B' : 'A'}" data-a="win" data-v="${t}" ${won[t] ? 'disabled' : ''}>${won[t] ? '✅ ' : ''}${esc(S.teams[t].name)} 정답 +${POINTS}</button>`).join('')}</div>` : ''}
+            <div class="row">
+              <button class="btn" data-a="prev" ${i === 0 ? 'disabled' : ''}>◀ 이전</button>
+              <button class="btn big" data-a="next">다음 ▶</button>
+              <button class="btn" data-a="restart" title="처음부터" style="flex:0 0 auto;padding:6px 10px">↺</button>
+            </div>
+            ${phase === 'ready' ? '<button class="btn" data-a="edit" style="font-size:13px;padding:6px">✏️ 영상 추가·관리</button>' : ''}
+          </div>
+        </div>
+      </div>`;
+    wrap.style.visibility = phase === 'ready' ? 'hidden' : '';
+    place();
+    setCtl({
+      q: `Q${i + 1} · ${s.name}`, answer: `${L[s.a]} ${s.opts[s.a]}`, detail: phase === 'revealed' ? '' : '보기: ' + s.opts.map((o, k) => `${L[k]} ${o}`).join(' / '),
+      revealed: phase === 'revealed',
+      win: showQ && !(won[0] && won[1]) ? { pts: POINTS } : null,
+      can: [
+        ...(phase === 'ready' ? [{ a: 'play', l: '▶ 재생', k: 'big' }] : []),
+        ...(phase === 'question' ? [{ a: 'replay', l: '🔁 다시 보기' }, { a: 'timer', l: '⏱ 10초' }, { a: 'reveal', l: '👀 정답 공개', k: 'big' }] : []),
+        ...(phase === 'revealed' ? [{ a: 'again', l: '🔁 정답 장면 다시' }] : []),
+        ...(i > 0 ? [{ a: 'prev', l: '◀ 이전' }] : []), { a: 'next', l: '다음 ▶' },
+      ],
+    });
+  }
+  const toQuestion = () => { if (phase === 'playing') { phase = 'question'; sfx.beep(); render(); } };
+  const move = (to) => { stopClip(); if (stopT) stopT(); i = to; phase = 'ready'; won = [false, false]; wrap.classList.remove('paused'); savePos(); render(); };
+  const revealFrom = () => (Number.isFinite(cur().rs) ? cur().rs : cur().stop); // 서서히 변하는 영상은 결과 장면으로 건너뜀
+
+  actions = {
+    play: () => { phase = 'playing'; render(); clip(cur().start, cur().stop, toQuestion); },
+    replay: () => { phase = 'playing'; render(); clip(cur().start, cur().stop, toQuestion); },
+    timer: () => {
+      if (stopT) stopT();
+      stopT = countdown(10, (x) => { const t = $('#tm'); if (t) { t.textContent = x; t.classList.toggle('warn', x <= 3); } if (x <= 3 && x > 0) sfx.tick(); },
+        () => { stopT = null; sfx.boom(); const t = $('#tm'); if (t) t.textContent = '셋, 둘, 하나! 🖐'; });
+    },
+    reveal: () => { if (stopT) stopT(); phase = 'revealed'; markDone(); sfx.fanfare(); render(); clip(revealFrom(), cur().end); },
+    again: () => clip(revealFrom(), cur().end),
+    // 두 팀이 동시에 답하므로 두 팀 모두 맞힐 수 있음
+    win: (t) => { const k = Number(t); if (won[k]) return; won[k] = true; addScore(k, POINTS); sfx.ok(); flash(k ? 'var(--B)' : 'var(--A)'); render(); },
+    next: () => move(nextOpen(i + 1)),
+    prev: () => move((i - 1 + list.length) % list.length),
+    restart: () => {
+      if (!confirm('다음 장면 맞히기를 처음부터 다시 할까요?\n(푼 영상이 다시 나옵니다)')) return;
+      S.quizDone[key()] = []; move(0); toast('↺ 처음부터');
+    },
+    edit: () => go('sceneEdit'),
+  };
+  render();
+  if (!ytUnlocked) toast('소리가 안 나오면 🏠 홈 → 🔊 사운드 준비를 먼저 해 주세요', 3500);
+};
+
+// ── ✏️ 다음 장면 영상 추가: 영상을 보면서 [📍 멈춤] 같은 버튼으로 시간을 정함 ──
+// 직접 만든 문제는 이 노트북(브라우저)에만 저장됩니다. 사회자 폰에는 정답이 보이고, 종이 정답지에는 안 나옵니다.
+screens.sceneEdit = () => {
+  if (!Array.isArray(S.myScenes)) S.myScenes = [];
+  const blank = () => ({ url: '', id: null, q: '', o0: '', o1: '', o2: '', a: 0, start: 0, stop: null, rs: null, end: null });
+  const f = blank();
+  const { wrap, place } = stagePlayer();
+  const now = () => (ytReady && yt.getCurrentTime ? Math.round(yt.getCurrentTime() * 10) / 10 : 0);
+  const tick = setInterval(() => { const el = $('#curT'); if (el) el.textContent = now().toFixed(1) + '초'; }, 200);
+  onCleanup(() => clearInterval(tick));
+  const fmt = (v) => (v == null ? '—' : v.toFixed(1) + '초');
+  const keep = () => ['url', 'q', 'o0', 'o1', 'o2'].forEach((k) => { const el = $('#f_' + k); if (el) f[k] = el.value; });
+
+  function render() {
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>✏️ 다음 장면 · 영상 추가</h2><span class="pill">직접 만든 문제 ${S.myScenes.length}개</span></div>
+        <div class="stage-wrap">
+          <div class="stage" style="gap:6px">
+            <div class="row" style="width:100%;flex-wrap:nowrap"><input id="f_url" class="names" style="min-height:0;flex:1" placeholder="YouTube 주소 붙여넣기" value="${esc(f.url)}"><button class="btn primary" data-a="load">불러오기</button></div>
+            <div class="scene-box" id="sbox">${f.id ? '' : '<div class="scene-wait">주소를 넣고 [불러오기]</div>'}</div>
+            <div class="row">
+              <button class="btn" data-a="seek" data-v="-5">−5초</button><button class="btn" data-a="seek" data-v="-1">−1초</button>
+              <button class="btn primary" data-a="toggle">▶ / ⏸</button>
+              <button class="btn" data-a="seek" data-v="1">+1초</button><button class="btn" data-a="seek" data-v="5">+5초</button>
+              <span class="pill" id="curT">0.0초</span>
+            </div>
+          </div>
+          <div class="controls" style="overflow-y:auto">
+            <div class="row">
+              <button class="btn" data-a="mark" data-v="start">📍 시작 ${fmt(f.start)}</button>
+              <button class="btn gold" data-a="mark" data-v="stop">📍 멈춤 ${fmt(f.stop)}</button>
+            </div>
+            <div class="row">
+              <button class="btn" data-a="mark" data-v="rs">📍 정답 장면 ${f.rs == null ? '(멈춤부터)' : fmt(f.rs)}</button>
+              <button class="btn" data-a="mark" data-v="end">📍 끝 ${fmt(f.end)}</button>
+            </div>
+            <p class="sub" style="margin:0;color:var(--muted);font-size:12px">영상을 보다가 원하는 순간에 📍 버튼을 누르세요. 멈춤은 <b>자막이 정답을 말하기 전</b>으로!</p>
+            <input id="f_q" class="names" style="min-height:0" placeholder="문제 (예: 화가 난 엄마가 김치를 집어 들었다!)" value="${esc(f.q)}">
+            ${[0, 1, 2].map((k) => `<div class="row" style="flex-wrap:nowrap"><button class="btn ${f.a === k ? 'ok' : ''}" data-a="ans" data-v="${k}" title="정답으로 지정" style="flex:0 0 auto">${f.a === k ? '✅' : '◻️'} ${['①', '②', '③'][k]}</button><input id="f_o${k}" class="names" style="min-height:0;flex:1" placeholder="보기 ${k + 1}${k === 0 ? ' (✅ 누른 보기가 정답)' : ''}" value="${esc(f['o' + k])}"></div>`).join('')}
+            <div class="row"><button class="btn" data-a="test">▶ 멈춤까지 미리보기</button><button class="btn big primary" data-a="save">💾 저장</button></div>
+            ${S.myScenes.length ? `<div class="results" style="max-height:none">${S.myScenes.map((x, k) => `<span class="o" style="cursor:pointer" data-a="del" data-v="${k}">🗑 ${esc(x.name)}</span>`).join('')}</div>` : ''}
+            <button class="btn" data-a="back">↩ 다음 장면 맞히기로</button>
+          </div>
+        </div>
+      </div>`;
+    wrap.style.visibility = f.id ? '' : 'hidden';
+    wrap.classList.remove('paused');
+    place();
+  }
+  actions = {
+    load: () => {
+      keep();
+      const id = ytId(f.url);
+      if (!id) { toast('YouTube 주소를 확인해 주세요'); return; }
+      Object.assign(f, { id, start: 0, stop: null, rs: null, end: null }); render();
+      playClip({ id, start: 0 }, 0); toast('영상을 불러왔어요. 보면서 📍 버튼으로 시간을 정하세요');
+    },
+    toggle: () => { if (!f.id) return; if (yt.getPlayerState() === YT.PlayerState.PLAYING) yt.pauseVideo(); else yt.playVideo(); },
+    seek: (v) => { if (f.id) yt.seekTo(Math.max(0, now() + Number(v)), true); },
+    mark: (v) => { keep(); if (!f.id) { toast('먼저 영상을 불러오세요'); return; } f[v] = now(); sfx.tick(); render(); },
+    ans: (v) => { keep(); f.a = Number(v); render(); },
+    test: () => { keep(); if (!f.id || f.stop == null) { toast('📍 멈춤 시간을 먼저 정해 주세요'); return; } playClip({ id: f.id, start: f.start || 0 }, f.stop - (f.start || 0)); },
+    save: () => {
+      keep();
+      const opts = [f.o0, f.o1, f.o2].map((x) => x.trim());
+      if (!f.id) { toast('영상을 불러오세요'); return; }
+      if (f.stop == null || f.stop <= (f.start || 0)) { toast('📍 멈춤 시간은 시작보다 뒤여야 해요'); return; }
+      if (!f.q.trim() || opts.some((x) => !x)) { toast('문제와 보기 3개를 모두 써 주세요'); return; }
+      const from = f.rs == null ? f.stop : f.rs, end = f.end == null || f.end <= from ? from + 12 : f.end;
+      S.myScenes.push({ id: f.id, name: f.q.trim().slice(0, 18), start: f.start || 0, stop: f.stop, ...(f.rs == null ? {} : { rs: f.rs }), end, q: f.q.trim(), opts, a: f.a, mine: true });
+      save(); stopClip(); sfx.fanfare(); toast('💾 저장했어요! 다음 장면 맞히기 마지막에 나옵니다');
+      Object.assign(f, blank()); render();
+    },
+    del: (v) => { const x = S.myScenes[Number(v)]; if (x && confirm(`'${x.name}' 문제를 지울까요?`)) { S.myScenes.splice(Number(v), 1); save(); render(); } },
+    back: () => go('scene'),
+  };
+  render();
 };
 
 // ── 🎭 몸으로 말해요 ──

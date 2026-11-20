@@ -222,6 +222,21 @@ input, textarea { font-family: inherit; }
 .nbtn.mafia { border-color: var(--bad); background: rgba(255, 92, 92, .2); }
 .night .stage { background: #05040c; }
 
+/* ── 📺 다음 장면 맞히기 ── */
+.scene-box { width: 100%; flex: 1; min-height: 0; max-height: 100%; aspect-ratio: 16 / 9; max-width: calc((100vh - 170px) * 16 / 9);
+  border-radius: 12px; background: #000; display: grid; place-items: center; }
+.scene-wait { color: var(--muted); font-weight: 800; }
+.scene-q { font-family: var(--title); font-size: clamp(16px, 3.6vmin, 28px); color: var(--gold); word-break: keep-all; line-height: 1.25; }
+.scene-opts { display: flex; flex-direction: column; gap: 6px; }
+.sopt { padding: 8px 12px; border-radius: 12px; background: var(--panel); border: 2px solid var(--panel-line); font-weight: 800; font-size: clamp(14px, 3.2vmin, 21px); word-break: keep-all; }
+.sopt b { color: var(--gold); margin-right: 4px; }
+.sopt.ok { border-color: var(--ok); background: rgba(61, 220, 151, .2); animation: pop .4s; }
+.sopt.no { opacity: .35; }
+#yt-wrap.yt-scene { position: fixed; z-index: 30; pointer-events: none; border-radius: 12px; overflow: hidden; background: #000; opacity: 1; transform: none; box-shadow: none; }
+#yt-wrap .yt-cover { display: none; position: absolute; left: 0; right: 0; z-index: 2; background: #000; }
+#yt-wrap.yt-scene .yt-cover.top { display: block; top: 0; height: 15%; }
+#yt-wrap.yt-scene.paused .yt-cover.bot { display: block; bottom: 0; height: 13%; }
+
 /* ── 🏅 개인 점수 ── */
 #scorebar .mid { display: flex; gap: 6px; }
 .whosheet { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 60; width: min(760px, calc(100vw - 20px));
