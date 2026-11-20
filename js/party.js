@@ -245,7 +245,7 @@ function phonesScreen() {
       </div>`).join('');
     main.innerHTML = `
       <div class="screen">
-        <div class="head"><h2>📱 폰 연결</h2><span class="sub">버저·폭탄·캐치마인드·올인을 폰으로</span></div>
+        <div class="head"><h2>📱 폰 연결</h2><span class="sub">버저 퀴즈 · 점수 확인을 폰으로</span></div>
         <div class="stage-wrap">
           <div class="stage" style="gap:8px">
             ${qrBlock(url, '70%')}

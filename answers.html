@@ -43,7 +43,7 @@
       <span class="note">게임의 ⚙️ 설정에 있는 번호와 같아야 순서가 일치합니다.</span>
     </div>
     <nav class="nav">
-      <a href="#music">🎵 노래</a><a href="#ost">🎬 OST</a><a href="#chosung">🔤 초성</a><a href="#photo">📸 사진</a><a href="#allin">🔥 올인</a>
+      <a href="#music">🎵 노래</a><a href="#ost">🎬 OST</a><a href="#chosung">🔤 초성</a><a href="#photo">📸 사진</a>
     </nav>
   </header>
   <main id="out"></main>
@@ -79,9 +79,6 @@
 
     html += `<section id="photo"><h2>📸 확대 사진 퀴즈</h2>` +
       list(seededOrder(CELEBS.length, 'photo', set).map((k) => `<b>${esc(CELEBS[k].name)}</b>`)) + '</section>';
-
-    html += `<section id="allin"><h2>🔥 올인 역전 퀴즈</h2>` +
-      list(seededOrder(ALLIN.length, 'allin', set).map((k) => `${esc(ALLIN[k].q)}<br><b>→ ${esc(ALLIN[k].a)}</b>`), true) + '</section>';
 
     document.getElementById('out').innerHTML = html;
   </script>

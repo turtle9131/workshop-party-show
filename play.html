@@ -8,7 +8,7 @@
   <title>파티 쇼 · 내 폰</title>
   <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=29">
+  <link rel="stylesheet" href="css/style.css?v=31">
 </head>
 <body>
   <main id="main"></main>
@@ -143,7 +143,7 @@
       else if (v.kind === 'draw') body = drawHtml();
       else if (v.kind === 'allin') body = allinHtml();
       else body = `<p class="notice" style="margin:0;text-align:center">✅ 접속 완료! 진행 화면(TV)을 봐 주세요.</p>
-        <p class="sub" style="margin:0;text-align:center;color:var(--muted)">버저 퀴즈·폭탄·캐치마인드·올인 때 이 화면이 자동으로 바뀝니다.</p>
+        <p class="sub" style="margin:0;text-align:center;color:var(--muted)">노래·OST·초성·사진 퀴즈 때 이 화면이 🔔 버저로 바뀝니다.</p>
         <div id="idleScore" class="sc-wrap">${scoreHtml()}</div>`;
       main.innerHTML = `<div class="screen">${head}${body}</div>`;
       bind();

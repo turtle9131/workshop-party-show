@@ -62,7 +62,7 @@ input, textarea { font-family: inherit; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 10px; }
 @media (orientation: portrait) { .grid { grid-template-columns: repeat(2, 1fr); } }
 @media (orientation: landscape) and (max-height: 500px) {
-  .grid { grid-template-columns: repeat(7, 1fr); gap: 8px; }
+  .grid { grid-template-columns: repeat(5, 1fr); gap: 8px; }
   #main { padding-top: 8px; }
   .card { padding: 8px 6px; gap: 2px; }
   .card .ic { font-size: 26px; }
