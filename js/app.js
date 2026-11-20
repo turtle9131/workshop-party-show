@@ -738,6 +738,21 @@ screens.photo = () => {
   const order = seededOrder(CELEBS.length, 'photo', S.set);
   let i = 0, stage = 0, revealed = false;
   const cur = () => CELEBS[order[i]];
+  // 진행 위치 + 이미 맞힌(공개한) 사진 기억 → 다른 게임에 갔다 와도 이어서, 푼 사진은 건너뜀 (정답지 번호와 계속 일치)
+  if (!S.quizPos) S.quizPos = {};
+  if (!S.quizDone) S.quizDone = {};
+  const key = () => 'photo:' + S.set;
+  const done = () => new Set(S.quizDone[key()] || []);
+  const markDone = () => { const a = S.quizDone[key()] || (S.quizDone[key()] = []); if (!a.includes(cur().file)) a.push(cur().file); save(); };
+  const savePos = () => { S.quizPos[key()] = i; save(); };
+  const leftCount = () => { const d = done(); return order.filter((k) => !d.has(CELEBS[k].file)).length; };
+  function nextOpen(from, quiet) {
+    const d = done();
+    for (let k = 0; k < order.length; k++) { const j = (from + k) % order.length; if (!d.has(CELEBS[order[j]].file)) return j; }
+    if (!quiet) toast('사진을 모두 풀었어요. [↺ 처음부터]로 다시 할 수 있어요', 3500);
+    return from % order.length;
+  }
+  i = nextOpen(S.quizPos[key()] || 0); savePos();
   const preload = (k) => { const c = CELEBS[order[k % order.length]]; if (c) new Image().src = 'img/' + c.file; };
 
   function render() {
@@ -749,7 +764,7 @@ screens.photo = () => {
           <div class="stage photo-stage">
             <div class="photo">
               <img id="ph" src="img/${c.file}" alt="" style="object-position:${c.fx}% ${c.fy}%;transform-origin:${c.fx}% ${c.fy}%;transform:scale(${sc})">
-              <span class="lvl">${i + 1}/${CELEBS.length} · ${revealed ? '정답!' : `${stage + 1}단계 · ${POINTS[stage]}점`}</span>
+              <span class="lvl">Q${i + 1} · 남은 ${leftCount()} · ${revealed ? '정답!' : `${stage + 1}단계 · ${POINTS[stage]}점`}</span>
               ${revealed ? `<div class="reveal"><div class="answer pop">${esc(c.name)}</div></div><span class="credit">사진: Wikimedia Commons</span>` : ''}
             </div>
           </div>
@@ -760,19 +775,30 @@ screens.photo = () => {
               <button class="btn A" data-a="win" data-v="0" ${revealed ? 'disabled' : ''}>${esc(S.teams[0].name)} +${POINTS[stage]}</button>
               <button class="btn B" data-a="win" data-v="1" ${revealed ? 'disabled' : ''}>${esc(S.teams[1].name)} +${POINTS[stage]}</button>
             </div>
-            <div class="row"><button class="btn big" data-a="next">다음 ▶</button></div>
+            <div class="row">
+              <button class="btn" data-a="prev" ${i === 0 ? 'disabled' : ''}>◀ 이전</button>
+              <button class="btn big" data-a="next">다음 ▶</button>
+              <button class="btn" data-a="restart" title="처음부터" style="flex:0 0 auto;padding:6px 10px">↺</button>
+            </div>
           </div>
         </div>
       </div>`;
   }
+  // 다음은 안 푼 사진으로 건너뛰고, 이전은 바로 앞 사진
+  const move = (to) => { i = to; stage = 0; revealed = false; savePos(); render(); preload(nextOpen(i + 1, true)); Party.buzzReset(); };
   actions = {
     zoom: () => { if (stage < 3) { stage++; sfx.beep(); render(); } },
-    reveal: () => { revealed = true; sfx.fanfare(); render(); },
-    win: (t) => { addScore(Number(t), POINTS[stage]); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; render(); Party.banner(null); },
-    next: () => { i = (i + 1) % order.length; stage = 0; revealed = false; render(); preload(i + 1); Party.buzzReset(); },
+    reveal: () => { revealed = true; markDone(); sfx.fanfare(); render(); },
+    win: (t) => { addScore(Number(t), POINTS[stage]); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; markDone(); render(); Party.banner(null); },
+    next: () => move(nextOpen(i + 1)),
+    prev: () => move((i - 1 + order.length) % order.length),
+    restart: () => {
+      if (!confirm('확대 사진 퀴즈를 처음부터 다시 할까요?\n(맞힌 사진이 다시 나옵니다)')) return;
+      S.quizDone[key()] = []; move(0); toast('↺ 처음부터');
+    },
   };
   Party.buzzer();
-  render(); preload(1);
+  render(); preload(nextOpen(i + 1, true));
 };
 
 // ── 🎭 몸으로 말해요 ──
@@ -2508,7 +2534,7 @@ screens.settings = () => {
     },
     resetPen: () => { $('#pen').value = DEFAULT_PENALTIES.join('\n'); },
     resetScore: () => {
-      if (!confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?\n(노래·OST·초성 퀴즈에서 푼 문제 기록도 처음으로 돌아갑니다)')) return;
+      if (!confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?\n(노래·OST·초성·사진 퀴즈에서 푼 문제 기록도 처음으로 돌아갑니다)')) return;
       S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; S.chosungDone = {}; S.chosungPos = {}; S.quizDone = {}; S.quizPos = {};
       save(); renderScore(); pushScores(); toast('점수 초기화');
     },
