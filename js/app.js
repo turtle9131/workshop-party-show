@@ -630,13 +630,30 @@ screens.teams = () => {
 screens.chosung = () => {
   const cats = ['전체', ...Object.keys(CHOSUNG)];
   const hangulLen = (w) => [...w].filter((ch) => ch >= '가' && ch <= '힣').length;
-  let cat = '전체', pool = [], i = 0, keep = 0, revealed = false, stopTimer = null;
+  let cat = S.chosungCat && cats.includes(S.chosungCat) ? S.chosungCat : '전체', pool = [], i = 0, keep = 0, revealed = false, stopTimer = null;
+  // 카테고리별 진행 위치 + 이미 푼(정답 공개된) 단어를 기억 → 카테고리를 오가도 푼 문제는 다시 안 나옴
+  // 문제 순서는 그대로 두고 건너뛰기만 하므로 정답지 번호와 계속 일치
+  if (!S.chosungPos) S.chosungPos = {};
+  if (!S.chosungDone) S.chosungDone = {};
+  const pk = () => S.set + ':' + cat;
+  const done = () => new Set(S.chosungDone[S.set] || []);
+  const markDone = (w) => { const a = S.chosungDone[S.set] || (S.chosungDone[S.set] = []); if (!a.includes(w)) a.push(w); };
+  const savePos = () => { S.chosungPos[pk()] = i; S.chosungCat = cat; save(); };
+  // from 부터 아직 안 푼 문제를 찾음. 다 풀었으면 알려 주고 그 자리 그대로
+  function nextOpen(from) {
+    const d = done();
+    for (let k = 0; k < pool.length; k++) { const j = (from + k) % pool.length; if (!d.has(pool[j].w)) return j; }
+    toast('이 카테고리 문제를 모두 풀었어요. [↺ 처음부터]로 다시 할 수 있어요', 3500);
+    return from % pool.length;
+  }
 
   function build() {
     const src = chosungList(cat);
     pool = seededOrder(src.length, 'chosung:' + cat, S.set).map((k) => src[k]);
-    i = 0; keep = 0; revealed = false;
+    keep = 0; revealed = false;
+    i = nextOpen(S.chosungPos[pk()] || 0); savePos();
   }
+  const leftCount = () => { const d = done(); return pool.filter((q) => !d.has(q.w)).length; };
   const pts = () => Math.max(1, 3 - keep);
 
   function render() {
@@ -648,7 +665,7 @@ screens.chosung = () => {
         </div>
         <div class="stage-wrap">
           <div class="stage">
-            <div class="row"><span class="pill">${esc(q.c)}</span><span class="pill">${i + 1} / ${pool.length}</span><span class="pill">${revealed ? '정답!' : pts() + '점'}</span></div>
+            <div class="row"><span class="pill">${esc(q.c)}</span><span class="pill">Q${i + 1} · 남은 ${leftCount()} / ${pool.length}</span><span class="pill">${revealed ? '정답!' : pts() + '점'}</span></div>
             <div class="word pop" style="color:var(--gold);letter-spacing:.08em">${esc(revealed ? q.w : chosung(q.w, keep))}</div>
             <div class="timer" id="tm"></div>
           </div>
@@ -660,12 +677,13 @@ screens.chosung = () => {
               <button class="btn B" data-a="win" data-v="1" ${revealed ? 'disabled' : ''}>${esc(S.teams[1].name)} +${pts()}</button>
             </div>
             <div class="row"><button class="btn big" data-a="next">다음 ▶</button></div>
+            <button class="btn" data-a="restart" style="font-size:13px;padding:6px">↺ 이 카테고리 처음부터</button>
           </div>
         </div>
       </div>`;
   }
   const stopT = () => { if (stopTimer) { stopTimer(); stopTimer = null; } };
-  const show = () => { stopT(); revealed = true; render(); };
+  const show = () => { stopT(); revealed = true; markDone(pool[i].w); save(); render(); };
 
   actions = {
     cat: (c) => { stopT(); cat = c; build(); render(); Party.buzzReset(); },
@@ -676,7 +694,13 @@ screens.chosung = () => {
     more: () => { keep++; sfx.beep(); render(); },
     reveal: () => { sfx.fanfare(); show(); },
     win: (t) => { addScore(Number(t), pts()); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); show(); Party.banner(null); },
-    next: () => { stopT(); i = (i + 1) % pool.length; keep = 0; revealed = false; render(); Party.buzzReset(); },
+    next: () => { stopT(); i = nextOpen(i + 1); keep = 0; revealed = false; savePos(); render(); Party.buzzReset(); },
+    restart: () => {
+      if (!confirm(`'${cat}' 카테고리를 처음부터 다시 할까요?\n(이 카테고리에서 푼 문제가 다시 나옵니다)`)) return;
+      const words = new Set(pool.map((q) => q.w));
+      S.chosungDone[S.set] = (S.chosungDone[S.set] || []).filter((w) => !words.has(w));
+      S.chosungPos[pk()] = 0; stopT(); build(); render(); Party.buzzReset(); toast(`↺ ${cat} 처음부터`);
+    },
   };
   Party.buzzer(() => stopT()); // 폰 버저: 누가 누르면 10초 타이머를 멈춤
   build(); render();
@@ -2457,7 +2481,11 @@ screens.settings = () => {
       save(); renderScore(); pushScores(); sfx.ok(); toast('저장했어요');
     },
     resetPen: () => { $('#pen').value = DEFAULT_PENALTIES.join('\n'); },
-    resetScore: () => { if (confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?')) { S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; save(); renderScore(); pushScores(); toast('점수 초기화'); } },
+    resetScore: () => {
+      if (!confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?\n(초성 퀴즈에서 푼 문제 기록도 처음으로 돌아갑니다)')) return;
+      S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; S.chosungDone = {}; S.chosungPos = {};
+      save(); renderScore(); pushScores(); toast('점수 초기화');
+    },
   };
 };
 
