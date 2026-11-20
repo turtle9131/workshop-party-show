@@ -350,11 +350,29 @@ const AUDIO_QUIZ = {
 };
 screens.music = (kind = 'music') => {
   const Q = AUDIO_QUIZ[kind];
-  let filter = Q.filters ? Q.filters[0] : null, list = Q.list(filter);
+  // 필터(전체/드라마/영화)별 진행 위치 + 이미 푼 곡을 기억 → 필터를 오가거나 화면을 나갔다 와도 이어서, 푼 곡은 건너뜀
+  // 순서는 그대로 두고 건너뛰기만 하므로 정답지 Q 번호와 계속 일치
+  if (!S.quizPos) S.quizPos = {};
+  if (!S.quizDone) S.quizDone = {};
+  if (!S.quizFilter) S.quizFilter = {};
+  let filter = Q.filters ? (Q.filters.includes(S.quizFilter[kind]) ? S.quizFilter[kind] : Q.filters[0]) : null, list = Q.list(filter);
   const orderFor = (f) => seededOrder(list.length, kind + (f ? ':' + f : ''), S.set);
   let order = orderFor(filter);
   let i = 0, hint = 0, revealed = false, playing = false;
   const song = () => list[order[i]];
+  const sid = (s) => s.id + '|' + Q.answer(s);
+  const dk = () => kind + ':' + S.set, pk = () => dk() + ':' + (filter || '');
+  const done = () => new Set(S.quizDone[dk()] || []);
+  const markDone = () => { const a = S.quizDone[dk()] || (S.quizDone[dk()] = []), k = sid(song()); if (!a.includes(k)) a.push(k); save(); };
+  const savePos = () => { S.quizPos[pk()] = i; if (filter) S.quizFilter[kind] = filter; save(); };
+  const leftCount = () => { const d = done(); return order.filter((k) => !d.has(sid(list[k]))).length; };
+  function nextOpen(from) {
+    const d = done();
+    for (let k = 0; k < order.length; k++) { const j = (from + k) % order.length; if (!d.has(sid(list[order[j]]))) return j; }
+    toast('이 목록의 곡을 모두 풀었어요. [↺ 처음부터]로 다시 할 수 있어요', 3500);
+    return from % order.length;
+  }
+  i = nextOpen(S.quizPos[pk()] || 0); savePos();
 
   function render() {
     const s = song();
@@ -365,7 +383,7 @@ screens.music = (kind = 'music') => {
           : `<span class="sub">${Q.sub}</span>`}</div>
         <div class="stage-wrap">
           <div class="stage">
-            <div class="qno">Q ${i + 1} / ${list.length}</div>
+            <div class="qno">Q ${i + 1} <small style="font-size:.6em">· 남은 ${leftCount()} / ${list.length}</small></div>
             <div class="disc ${playing ? 'spin' : ''}" id="disc"></div>
             <div class="bar"><i id="prog"></i></div>
             ${revealed ? '' : Q.hints.slice(0, hint).map((h) => `<div class="${h.big ? 'hint' : 'pill'} pop">${esc(h.text(s))}</div>`).join('')}
@@ -393,6 +411,7 @@ screens.music = (kind = 'music') => {
             <div class="row">
               <button class="btn" data-a="prev" ${i === 0 ? 'disabled' : ''}>◀ 이전</button>
               <button class="btn" data-a="next">다음 ▶</button>
+              <button class="btn" data-a="restart" title="이 목록 처음부터" style="flex:0 0 auto;padding:6px 10px">↺</button>
             </div>
           </div>
         </div>
@@ -401,17 +420,24 @@ screens.music = (kind = 'music') => {
   const setProg = (p) => { const el = $('#prog'); if (el) el.style.width = (p * 100) + '%'; };
   onYtPlaying = (on) => { playing = on; const d = $('#disc'); if (d) d.classList.toggle('spin', on); };
   onCleanup(() => { onYtPlaying = null; });
-  const move = (d) => { stopClip(); i = (i + d + list.length) % list.length; hint = 0; revealed = false; render(); cueSong(song()); Party.buzzReset(); };
+  // 다음은 안 푼 곡으로 건너뛰고, 이전은 바로 앞 곡(다시 듣기용)
+  const move = (d) => { stopClip(); i = d > 0 ? nextOpen(i + 1) : (i - 1 + list.length) % list.length; hint = 0; revealed = false; savePos(); render(); cueSong(song()); Party.buzzReset(); };
   Party.buzzer(() => stopClip()); // 폰 버저: 누가 누르면 노래를 멈춤
 
   actions = {
-    filter: (f) => { stopClip(); filter = f; list = Q.list(f); order = orderFor(f); i = 0; hint = 0; revealed = false; render(); cueSong(song()); Party.buzzReset(); },
+    filter: (f) => { stopClip(); filter = f; list = Q.list(f); order = orderFor(f); i = nextOpen(S.quizPos[pk()] || 0); hint = 0; revealed = false; savePos(); render(); cueSong(song()); Party.buzzReset(); },
+    restart: () => {
+      if (!confirm(`${filter ? `'${filter}' 목록을` : '처음부터'} 다시 할까요?\n(이 목록에서 푼 곡이 다시 나옵니다)`)) return;
+      const mine = new Set(order.map((k) => sid(list[k])));
+      S.quizDone[dk()] = (S.quizDone[dk()] || []).filter((x) => !mine.has(x));
+      stopClip(); i = 0; hint = 0; revealed = false; savePos(); render(); cueSong(song()); Party.buzzReset(); toast('↺ 처음부터');
+    },
     clip: (v) => { setProg(0); playClip(song(), Number(v), setProg); },
     full: () => { setProg(1); playClip(song(), 0); },
     stop: () => stopClip(),
     hint: () => { if (hint < Q.hints.length) { hint++; sfx.beep(); render(); } },
-    reveal: () => { revealed = true; sfx.fanfare(); render(); },
-    win: (t) => { addScore(Number(t), 1); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; render(); playClip(song(), 0); Party.banner(null); },
+    reveal: () => { revealed = true; markDone(); sfx.fanfare(); render(); },
+    win: (t) => { addScore(Number(t), 1); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; markDone(); render(); playClip(song(), 0); Party.banner(null); },
     prev: () => move(-1),
     next: () => move(1),
   };
@@ -2482,8 +2508,8 @@ screens.settings = () => {
     },
     resetPen: () => { $('#pen').value = DEFAULT_PENALTIES.join('\n'); },
     resetScore: () => {
-      if (!confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?\n(초성 퀴즈에서 푼 문제 기록도 처음으로 돌아갑니다)')) return;
-      S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; S.chosungDone = {}; S.chosungPos = {};
+      if (!confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?\n(노래·OST·초성 퀴즈에서 푼 문제 기록도 처음으로 돌아갑니다)')) return;
+      S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; S.chosungDone = {}; S.chosungPos = {}; S.quizDone = {}; S.quizPos = {};
       save(); renderScore(); pushScores(); toast('점수 초기화');
     },
   };
