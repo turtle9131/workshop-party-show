@@ -40,7 +40,11 @@ function lanIps() {
 }
 
 const tok = () => crypto.randomBytes(12).toString('hex');
-const send = (s, obj) => s.res.write(`data: ${JSON.stringify(obj)}\n\n`);
+// 이미 닫힌 연결에 쓰면 서버 전체가 죽으므로 확인 후 씀
+const send = (s, obj) => {
+  if (s.res.writableEnded || s.res.destroyed) return;
+  try { s.res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch (e) { /* 끊긴 연결 무시 */ }
+};
 
 // ═══════════════════ 🕵️ 마피아 · 🤥 라이어 공통 (명단 + 이름 잠금) ═══════════════════
 // room = { kind: 'm'|'l', g, ht(진행 토큰), claims: [플레이어 토큰|null], phase, subs: Set, ...게임별 상태 }
@@ -188,13 +192,18 @@ function cleanScores(s) {
     mode: ['all', 'team', 'off'].includes(s.mode) ? s.mode : 'all',
     teams: (Array.isArray(s.teams) ? s.teams : []).slice(0, 2).map((t) => ({ name: str(t && t.name, 12), score: num(t && t.score) })),
     leaders: Array.isArray(s.leaders) ? s.leaders.slice(0, 2).map((x) => str(x, 20)) : null,
+    set: Math.max(1, num(s.set) || 1), // 문제 세트 번호 (사회자 폰 정답지용)
     indiv: (Array.isArray(s.indiv) ? s.indiv : []).slice(0, 80).map((x) => ({ name: str(x && x.name, 20), team: x && x.team === 1 ? 1 : 0, pts: num(x && x.pts) })),
   };
 }
+// 🎤 사회자 리모컨(host.html): 전체 점수(공개 범위와 무관) + 진행 화면 연결 여부
+const hostOnline = () => [...P.subs].some((s) => s.host);
+function remoteView() { return { t: 'rstate', scores: P.scores || null, host: hostOnline(), teamNames: P.teamNames }; }
 function pBroadcast() {
   if (!P) return;
   for (const s of P.subs) {
-    if (s.host) send(s, partyHostView());
+    if (s.remote) send(s, remoteView());
+    else if (s.host) send(s, partyHostView());
     else { const m = P.members.get(s.id); send(s, m && m.pt === s.pt ? partyPlayerView(m) : { t: 'kicked' }); }
   }
 }
@@ -220,7 +229,7 @@ function openStream(req, res, subs, s, onClose) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write('retry: 2000\n\n');
   s.res = res; subs.add(s);
-  const ping = setInterval(() => res.write(': ping\n\n'), 20000);
+  const ping = setInterval(() => { if (!res.writableEnded && !res.destroyed) try { res.write(': ping\n\n'); } catch (e) { /* 끊김 */ } }, 20000);
   req.on('close', () => { clearInterval(ping); subs.delete(s); onClose(); });
 }
 
@@ -343,6 +352,7 @@ async function partyApi(route, req, res, q) {
     if (!P) return json(res, 404, { error: 'noparty' });
     const s = {};
     if (q.get('ht')) { if (q.get('ht') !== P.ht) return json(res, 403, { error: 'auth' }); s.host = true; }
+    else if (q.get('rk')) { if (!P.rk || q.get('rk') !== P.rk) return json(res, 403, { error: 'auth' }); s.remote = true; }
     else {
       const m = pMembers().find((x) => x.pt === q.get('pt'));
       if (!q.get('pt') || !m) return json(res, 403, { error: 'auth' });
@@ -371,14 +381,36 @@ async function partyApi(route, req, res, q) {
   if (route === 'open') {
     const teamNames = Array.isArray(b.teamNames) ? b.teamNames.slice(0, 2).map((x) => String(x).slice(0, 12)) : ['A팀', 'B팀'];
     const roster = Array.isArray(b.roster) && b.roster.length === 2 ? b.roster.map((t) => (Array.isArray(t) ? t.map((x) => String(x).slice(0, 20)).slice(0, 40) : [])) : null;
-    if (P && P.ht === b.ht) { P.teamNames = teamNames; P.roster = roster; pBroadcast(); return json(res, 200, { ht: P.ht }); }
+    const rk = typeof b.rk === 'string' && b.rk.length >= 12 ? b.rk.slice(0, 64) : null; // 사회자 리모컨 키
+    if (P && P.ht === b.ht) {
+      if (rk && rk !== P.rk) { // 키를 바꾸면 기존 리모컨은 끊김
+        for (const s of [...P.subs]) if (s.remote) { P.subs.delete(s); s.res.end(); }
+        P.rk = rk;
+      }
+      P.teamNames = teamNames; P.roster = roster; pBroadcast(); return json(res, 200, { ht: P.ht });
+    }
     if (P && !b.force) return json(res, 409, { error: 'exists' });
     if (P) for (const s of P.subs) s.res.end();
-    P = { ht: typeof b.ht === 'string' && b.ht.length >= 16 ? b.ht : tok(), teamNames, roster, members: new Map(), nextId: 1, act: { kind: 'idle' }, subs: new Set() };
+    P = { ht: typeof b.ht === 'string' && b.ht.length >= 16 ? b.ht : tok(), rk, teamNames, roster, members: new Map(), nextId: 1, act: { kind: 'idle' }, subs: new Set() };
     console.log('[폰 연결] 방을 열었습니다');
     return json(res, 200, { ht: P.ht });
   }
   if (!P) return json(res, 404, { error: 'noparty' });
+
+  // 🎤 사회자 리모컨: 점수 명령을 진행 화면(노트북)으로 전달. 실제 점수 계산·저장은 진행 화면이 함
+  if (route === 'remote') {
+    if (!P.rk || b.rk !== P.rk) return json(res, 403, { error: 'auth' });
+    if (!hostOnline()) return json(res, 409, { error: 'nohost' });
+    const op = ['team', 'indiv', 'undo'].includes(b.op) ? b.op : null;
+    if (!op) return json(res, 400, { error: 'op' });
+    const n = Math.max(-20, Math.min(20, Math.round(+b.n) || 0));
+    pHosts({
+      t: 'remote', op, team: b.team === 1 ? 1 : 0, n,
+      who: Array.isArray(b.who) ? b.who.slice(0, 40).map((x) => String(x).slice(0, 20)) : [],
+      ip: Math.max(0, Math.min(10, Math.round(+b.ip) || 0)),
+    });
+    return json(res, 200, { ok: true });
+  }
 
   // 참가자: 이름·팀으로 접속 (같은 이름은 한 명만)
   if (route === 'join') {

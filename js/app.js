@@ -82,6 +82,9 @@ $('#scorebar').addEventListener('click', (e) => {
 if (!S.indiv || typeof S.indiv !== 'object') S.indiv = {};
 if (S.askWho === undefined) S.askWho = true;
 if (!S.scoreShow) S.scoreShow = 'all'; // 참가자 폰 공개 범위: all(팀+개인) | team(팀만) | off(숨김)
+// 🎤 사회자 리모컨 키 (host.html?k=…). 이 키를 아는 폰만 점수를 줄 수 있음
+const newKey = () => Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => b.toString(16).padStart(2, '0')).join('');
+if (!S.rk) { S.rk = newKey(); save(); }
 
 // 팀원 = 팀 나누기 명단 + 폰으로 접속한 사람 + 이미 포인트를 받은 사람
 function teamMembers(t) {
@@ -143,7 +146,7 @@ function showWho(onlyCount) {
 let pushT = null;
 function scorePayload() {
   return {
-    mode: S.scoreShow, leaders: S.leaders || null,
+    mode: S.scoreShow, leaders: S.leaders || null, set: S.set,
     teams: S.teams.map((t) => ({ name: t.name, score: t.score })),
     indiv: allPlayers().map((x) => ({ name: x.n, team: x.t, pts: x.p })),
   };
@@ -290,7 +293,7 @@ screens.home = () => {
       </div>
       <div class="tools">
         <button class="btn ${ytUnlocked ? 'ok' : 'gold'}" data-a="sound">${ytUnlocked ? '✅ 사운드 준비됨' : '🔊 사운드 준비 (먼저!)'}</button>
-        ${NET.info ? '<button class="btn primary" data-a="phones">📱 폰 연결</button>' : ''}
+        ${NET.info ? '<button class="btn primary" data-a="phones">📱 폰 연결</button><button class="btn" data-a="remote">🎤 사회자 폰</button>' : ''}
         <button class="btn" data-a="scores">🏅 점수판</button>
         <button class="btn" data-a="fs">⛶ 전체화면</button>
         <button class="btn" data-a="settings">⚙️ 설정</button>
@@ -300,6 +303,7 @@ screens.home = () => {
     open: (k) => go(k),
     sound: () => go('sound'),
     phones: () => go('phones'),
+    remote: () => go('remote'),
     scores: () => go('scores'),
     settings: () => go('settings'),
     fs: () => {
@@ -2450,7 +2454,7 @@ screens.settings = () => {
       const ssid = $('#ssid').value.trim();
       S.wifi = ssid ? { ssid, pass: $('#wpass').value } : null;
       document.querySelector('a[href^="answers.html"]').href = 'answers.html?set=' + S.set;
-      save(); renderScore(); sfx.ok(); toast('저장했어요');
+      save(); renderScore(); pushScores(); sfx.ok(); toast('저장했어요');
     },
     resetPen: () => { $('#pen').value = DEFAULT_PENALTIES.join('\n'); },
     resetScore: () => { if (confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?')) { S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; save(); renderScore(); pushScores(); toast('점수 초기화'); } },
@@ -2485,6 +2489,7 @@ screens.scores = () => {
             <p class="sub" style="margin:0;text-align:center;color:var(--muted)">${NET.info ? (Party.st ? `지금 폰 ${Party.members().length}대에 실시간으로 보입니다` : '홈 → 📱 폰 연결을 열면 폰에서 볼 수 있어요') : '노트북 서버(start.bat)로 열면 폰에서 볼 수 있어요'}</p>
             <button class="btn ${S.askWho ? 'on' : ''}" data-a="ask">🙋 팀 점수 줄 때 "누가 맞혔나요?" ${S.askWho ? 'ON' : 'OFF'}</button>
             <button class="btn big gold" data-a="awards">🏆 시상식</button>
+            ${NET.info ? '<button class="btn" data-a="remote">🎤 사회자 폰 연결 (정답지 + 점수 주기)</button>' : ''}
             <button class="btn bad" data-a="reset">개인 포인트 초기화</button>
           </div>
         </div>
@@ -2496,6 +2501,7 @@ screens.scores = () => {
     show: (v) => { S.scoreShow = v; save(); pushScores(); sfx.tick(); toast(`📱 참가자 폰: ${SHOW.find((x) => x[0] === v)[1]}`); draw(); },
     ask: () => { S.askWho = !S.askWho; save(); draw(); },
     awards: () => go('awards'),
+    remote: () => go('remote'),
     reset: () => { if (confirm('개인 포인트를 모두 0으로 만들까요? (팀 점수는 그대로)')) { S.indiv = {}; save(); pushScores(); draw(); toast('개인 포인트 초기화'); } },
   };
   draw();
@@ -2558,6 +2564,73 @@ screens.awards = () => {
   };
   if (!groups.length) toast('아직 개인 포인트를 받은 사람이 없어요. 팀 우승만 발표합니다', 3500);
   show(false);
+};
+
+// ── 🎤 사회자 폰(리모컨)에서 온 점수 명령 처리 ──
+// 진행 화면이 점수의 주인이므로, 폰은 명령만 보내고 계산·저장·폰 공유는 여기서 함
+const rlog = []; // [↩️ 방금 것 취소]용 기록
+function onRemote(v) {
+  const TN = S.teams[v.team].name;
+  if (v.op === 'team') {
+    addScore(v.team, v.n, false);
+    v.who.forEach((nm) => addIndiv(nm, v.team, v.ip));
+    rlog.push(v);
+    if (v.n > 0) { sfx.ok(); flash(v.team ? 'var(--B)' : 'var(--A)'); } else sfx.bad();
+    const who = !v.who.length ? '' : v.who.length > 3 ? ` · 팀 전원 +${v.ip}` : ` · ${v.who.join(', ')} +${v.ip}`;
+    toast(`🎤 ${TN} ${v.n > 0 ? '+' : ''}${v.n}점${who}`);
+  } else if (v.op === 'indiv' && v.who[0]) {
+    addIndiv(v.who[0], v.team, v.n); rlog.push(v); sfx.tick();
+    toast(`🎤 ${v.who[0]} ${v.n > 0 ? '+' : ''}${v.n}점`);
+  } else if (v.op === 'undo') {
+    const x = rlog.pop();
+    if (!x) { toast('🎤 취소할 점수가 없어요'); return; }
+    if (x.op === 'team') { addScore(x.team, -x.n, false); x.who.forEach((nm) => addIndiv(nm, x.team, -x.ip)); }
+    else addIndiv(x.who[0], x.team, -x.n);
+    sfx.tick(); toast('🎤 방금 준 점수를 취소했어요');
+  }
+  if (current === 'scores') go('scores'); // 점수판 화면이면 다시 그림
+}
+Party.on((v) => { if (v.t === 'remote') onRemote(v); });
+
+// ── 🎤 사회자 폰 연결 화면: QR을 사회자만 찍고 바로 닫음 ──
+screens.remote = async () => {
+  main.innerHTML = '<div class="screen"><div class="stage"><div class="sub">📡 서버에 연결하는 중…</div></div></div>';
+  await NET.ready;
+  const ok = NET.info && await Party.open();
+  if (current !== 'remote') return;
+  if (!ok) {
+    main.innerHTML = `
+      <div class="screen"><div class="stage">
+        <div class="result-big">😵 노트북 서버가 필요해요</div>
+        <p class="sub" style="text-align:center;color:var(--muted)">노트북에서 <b>start.bat</b>(node server.js)을 실행하고<br><b>http://localhost:8000</b> 으로 열어 주세요.</p>
+        <div class="row"><button class="btn primary" data-a="retry">🔁 다시 시도</button><button class="btn" data-a="home">🏠 홈</button></div>
+      </div></div>`;
+    actions = { retry: () => go('remote'), home: () => go('home') };
+    return;
+  }
+  const url = `${NET.origin()}/host.html?k=${S.rk}`;
+  main.innerHTML = `
+    <div class="screen">
+      <div class="head"><h2>🎤 사회자 폰 연결</h2><span class="sub">사회자 폰에서 정답지 보면서 점수 주기</span></div>
+      <div class="stage-wrap">
+        <div class="stage" style="gap:8px">${qrBlock(url, '70%')}</div>
+        <div class="controls">
+          <p class="notice" style="margin:0;text-align:center">⚠️ 이 QR을 찍으면 누구나 점수를 줄 수 있어요<br>사회자만 찍고 바로 닫아 주세요</p>
+          <p class="sub" style="margin:0;text-align:center;color:var(--muted)">TV에 비치므로 참가자들이 잠깐 고개를 돌리게 하거나,<br>사회자 폰을 노트북 화면 가까이 대고 빠르게 찍으세요.</p>
+          <button class="btn big primary" data-a="home">✅ 찍었어요 → 닫기</button>
+          <button class="btn" data-a="rotate">🔄 키 바꾸기 (다른 사람이 찍었을 때)</button>
+          <button class="btn" data-a="scores">🏅 점수판</button>
+        </div>
+      </div>
+    </div>`;
+  actions = {
+    home: () => go('home'),
+    scores: () => go('scores'),
+    rotate: async () => {
+      if (!confirm('사회자 키를 바꿀까요?\n지금 연결된 사회자 폰은 끊기고, 새 QR을 다시 찍어야 합니다.')) return;
+      S.rk = newKey(); save(); await Party.open(); toast('🔄 키를 바꿨어요. 새 QR을 찍어 주세요'); go('remote');
+    },
+  };
 };
 
 // ═══════════════════════ 시작 ═══════════════════════

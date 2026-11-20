@@ -147,7 +147,7 @@ const Party = {
     if (!NET.info) return false;
     try {
       const roster = S.roster && S.roster.length === 2 ? S.roster : null;
-      const j = await NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster, force: !!force });
+      const j = await NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster, rk: S.rk, force: !!force });
       S.partyHt = j.ht; save();
       if (typeof pushScores === 'function') pushScores(); // 폰에 현재 점수 보내기
     } catch (e) {
@@ -160,7 +160,7 @@ const Party = {
       Party.h = NET.stream(`/api/p/events?ht=${S.partyHt}`, (v) => {
         if (v.t === 'host') { Party.st = v; Party.badge(); }
         Party.emit(v);
-      }, () => NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster: S.roster || null })
+      }, () => NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster: S.roster || null, rk: S.rk })
         .then(() => { if (typeof pushScores === 'function') pushScores(); }).catch(() => null));
     }
     return true;
@@ -254,6 +254,7 @@ function phonesScreen() {
             <p class="notice" style="margin:0;text-align:center">${joinHint('이름과 팀을 고르세요')}</p>
             <p class="sub" style="margin:0;text-align:center;color:var(--muted)">한 번만 하면 행사 내내 써요. ${S.roster ? '팀 나누기 결과대로 이름만 고르면 됩니다.' : '팀 나누기를 먼저 하면 이름만 고르면 돼요.'} 이름을 누르면 접속을 끊을 수 있어요.</p>
             <div class="tboard" id="plist" style="flex:1;min-height:0;overflow:auto">${list()}</div>
+            <button class="btn" data-a="remote">🎤 사회자 폰 연결 (정답지 + 점수 주기)</button>
             ${NET.canSwitchIp() ? '<button class="btn" data-a="ip">🌐 다른 주소로 바꾸기</button>' : ''}
             <button class="btn big primary" data-a="home">🏠 홈으로</button>
           </div>
@@ -264,6 +265,7 @@ function phonesScreen() {
     actions = {
       kick: (v) => { const m = Party.st.members.find((x) => x.id === Number(v)); if (m && confirm(`${m.name} 님의 접속을 끊을까요?`)) Party.kick(m.id); },
       ip: () => { NET.nextIp(); phonesScreen(); },
+      remote: () => go('remote'),
       home: () => go('home'),
     };
   });
