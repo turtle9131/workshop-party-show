@@ -48,7 +48,7 @@
   </header>
   <main id="out"></main>
 
-  <script src="js/data.js?v=30"></script>
+  <script src="js/data.js?v=33"></script>
   <script src="js/order.js?v=14"></script>
   <script>
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -73,7 +73,7 @@
     html += `<section id="chosung"><h2>🔤 초성 퀴즈</h2>`;
     for (const c of CHOSUNG_CATS) {
       const l = chosungList(c);
-      html += `<h3>${esc(c)}</h3>` + list(seededOrder(l.length, 'chosung:' + c, set).map((k) => `<b>${esc(l[k].w)}</b>${c === '전체' ? ` <small>${esc(l[k].c)}</small>` : ''}`));
+      html += `<h3>${esc(c)}</h3>` + list(seededOrder(l.length, 'chosung:' + c, set).map((k) => `<b>${esc(l[k].w)}</b>${c === '전체' ? ` <small>${esc(l[k].c)}</small>` : ''}${CHOSUNG_MEANING[l[k].w] ? ` <small>(${esc(CHOSUNG_MEANING[l[k].w])})</small>` : ''}`));
     }
     html += '</section>';
 

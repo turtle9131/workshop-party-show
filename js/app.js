@@ -720,6 +720,7 @@ screens.chosung = () => {
           <div class="stage">
             <div class="row"><span class="pill">${esc(q.c)}</span><span class="pill">Q${i + 1} · 남은 ${leftCount()} / ${pool.length}</span><span class="pill">${revealed ? '정답!' : pts() + '점'}</span></div>
             <div class="word pop" style="color:var(--gold);letter-spacing:.08em">${esc(revealed ? q.w : chosung(q.w, keep))}</div>
+            ${revealed && CHOSUNG_MEANING[q.w] ? `<div class="notice pop" style="margin:0">💬 ${esc(CHOSUNG_MEANING[q.w])}</div>` : ''}
             <div class="timer" id="tm"></div>
           </div>
           <div class="controls">
@@ -735,7 +736,7 @@ screens.chosung = () => {
         </div>
       </div>`;
     setCtl({
-      q: `${cat} · Q${i + 1}`, answer: q.w, detail: q.c, revealed,
+      q: `${cat} · Q${i + 1}`, answer: q.w, detail: CHOSUNG_MEANING[q.w] ? `${q.c} · ${CHOSUNG_MEANING[q.w]}` : q.c, revealed,
       win: revealed ? null : { pts: pts() },
       can: [
         { a: 'timer', l: '⏱ 10초' },
