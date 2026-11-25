@@ -1550,7 +1550,7 @@ screens.allin = () => {
 };
 
 // ── 🎁 패배팀 상품 뽑기 ──
-// 상자(보조배터리·와인·선물 교환권)를 섞어 놓고, 패배팀이 한 명씩 상자 번호를 골라 엽니다.
+// 상자(보조배터리·와인)를 섞어 놓고, 패배팀이 한 명씩 상자 번호를 골라 엽니다.
 // 🔄 선물 교환권: 이미 선물을 받은 사람 한 명을 골라 그 선물을 뺏어 오고, 뺏긴 사람은 남은 상자에서 다시 뽑습니다.
 screens.gift = () => {
   let G = S.gift && S.gift.boxes ? S.gift : null, busy = false, playActs = null;
@@ -1564,7 +1564,8 @@ screens.gift = () => {
   function setup() {
     const [a, b] = S.teams.map((t) => t.score);
     let team = G ? G.team : a === b ? 1 : a < b ? 0 : 1;
-    const pool = (Array.isArray(S.giftPool) ? S.giftPool : LOSER_GIFTS).map((x) => ({ ...x }));
+    const hasSwap = LOSER_GIFTS.some((x) => x.swap);
+    const pool = (Array.isArray(S.giftPool) ? S.giftPool : LOSER_GIFTS).filter((x) => hasSwap || !x.swap).map((x) => ({ ...x }));
     function draw() {
       const mem = teamMembers(team), boxes = pool.reduce((s, x) => s + x.c, 0), real = pool.filter((x) => !x.swap).reduce((s, x) => s + x.c, 0);
       main.innerHTML = `
@@ -1576,7 +1577,7 @@ screens.gift = () => {
               <div class="ngrid">${mem.map((n) => `<span class="nbtn ${team ? 'tB' : 'tA'}">${esc(n)}</span>`).join('') || '<p class="sub" style="color:var(--muted)">🎲 팀 나누기를 먼저 해 주세요</p>'}</div>
               <div class="gpool">${pool.map((x, k) => `<div class="prow"><span>${esc(x.n)}</span><button data-a="cnt" data-v="${k}:-1">−</button><span class="pp">${x.c}</span><button data-a="cnt" data-v="${k}:1">＋</button></div>`).join('')}</div>
               ${real < mem.length ? `<p class="notice" style="margin:0">⚠️ 선물(${real}개)이 인원(${mem.length}명)보다 적어요. 못 받는 사람이 생깁니다.</p>` : ''}
-              <p class="sub" style="margin:0;color:var(--muted)">🔄 선물 교환권: 이미 선물을 받은 사람의 선물을 뺏어 옵니다. 뺏긴 사람은 남은 상자에서 다시 뽑아요.</p>
+              ${pool.some((x) => x.swap) ? `<p class="sub" style="margin:0;color:var(--muted)">🔄 선물 교환권: 이미 선물을 받은 사람의 선물을 뺏어 옵니다. 뺏긴 사람은 남은 상자에서 다시 뽑아요.</p>` : ''}
             </div>
             <div class="controls">
               <p class="notice" style="margin:0;text-align:center">🏆 우승팀: ${esc(PRIZE_INFO.win)}<br>👑 개인 우수상: ${esc(PRIZE_INFO.mvp)}</p>
