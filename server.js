@@ -401,7 +401,8 @@ async function partyApi(route, req, res, q) {
     const players = !roster && Array.isArray(b.players) ? b.players.slice(0, 60).map((x) => String(x).slice(0, 20)) : null;
     const syncTeams = () => { // 명단이 바뀌면 이미 접속한 폰의 팀도 맞춤
       for (const m of P.members.values()) {
-        if (roster) { const t = roster[0].includes(m.name) ? 0 : roster[1].includes(m.name) ? 1 : -1; if (t >= 0) m.team = t; }
+        const nz = (x) => String(x).replace(/\s+/g, ''), has = (t) => roster[t].some((x) => nz(x) === nz(m.name));
+        if (roster) { const t = has(0) ? 0 : has(1) ? 1 : -1; if (t >= 0) { m.team = t; m.name = roster[t].find((x) => nz(x) === nz(m.name)); } }
         else if (players) m.team = -1;
       }
     };
@@ -438,9 +439,13 @@ async function partyApi(route, req, res, q) {
 
   // 참가자: 이름·팀으로 접속 (같은 이름은 한 명만)
   if (route === 'join') {
-    const name = String(b.name || '').trim().slice(0, 20), team = Number(b.team);
+    let name = String(b.name || '').trim().replace(/\s+/g, ' ').slice(0, 20); const team = Number(b.team);
+    { // 명단과 띄어쓰기만 다르면 명단 표기로 맞춤 (점수가 같은 사람에게 쌓이도록)
+      const nz = (x) => String(x).replace(/\s+/g, ''), list = P.roster ? [...P.roster[0], ...P.roster[1]] : P.players || [];
+      const ex = list.find((x) => nz(x) === nz(name)); if (ex) name = ex;
+    }
     if (!name || !(team === 0 || team === 1 || team === -1)) return json(res, 400, { error: 'input' });
-    if (pMembers().some((m) => m.name === name)) return json(res, 409, { error: 'taken' });
+    if (pMembers().some((m) => m.name.replace(/\s+/g, '') === name.replace(/\s+/g, ''))) return json(res, 409, { error: 'taken' });
     const m = { id: P.nextId++, name, team, pt: tok() };
     P.members.set(m.id, m);
     if (P.act.kind === 'draw' && P.act.drawer == null) setDrawer();

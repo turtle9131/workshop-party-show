@@ -294,8 +294,8 @@ function phonesScreen() {
             ${qrBlock(url, '70%')}
           </div>
           <div class="controls">
-            <p class="notice" style="margin:0;text-align:center">${joinHint('이름과 팀을 고르세요')}</p>
-            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">한 번만 하면 행사 내내 써요. ${S.roster ? '팀 나누기 결과대로 이름만 고르면 됩니다.' : '팀 나누기를 먼저 하면 이름만 고르면 돼요.'} 이름을 누르면 접속을 끊을 수 있어요.</p>
+            <p class="notice" style="margin:0;text-align:center">${joinHint('자기 이름을 입력하세요')}</p>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">한 번만 하면 행사 내내 써요. 버저를 누르면 TV에 이 이름이 떠요. ${Party.soloList() ? '지금은 👤 개인전이라 이름만 입력합니다.' : S.roster ? '팀 나누기 명단에 있는 이름이면 팀이 자동으로 정해져요.' : '이름을 입력하고 팀을 고릅니다.'} 이름을 누르면 접속을 끊을 수 있어요.</p>
             <div class="tboard" id="plist" style="flex:1;min-height:0;overflow:auto">${list()}</div>
             <button class="btn" data-a="remote">🎤 사회자 폰 연결 (정답지 + 점수 주기)</button>
             ${NET.canSwitchIp() ? '<button class="btn" data-a="ip">🌐 다른 주소로 바꾸기</button>' : ''}

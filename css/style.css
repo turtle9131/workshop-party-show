@@ -519,3 +519,5 @@ input, textarea { font-family: inherit; }
 .bc-reset { opacity: .75; }
 .buzzopen { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 45; padding: 10px 22px; border-radius: 999px; font-weight: 900; font-size: clamp(16px, 3vmin, 24px);
   background: rgba(20, 16, 40, .9); border: 2px solid var(--gold); box-shadow: 0 10px 30px rgba(0, 0, 0, .5); animation: pop .3s ease; white-space: nowrap; }
+.bc-team { font-family: 'Black Han Sans', sans-serif; font-weight: 400; font-size: clamp(26px, 6.5vmin, 60px); padding: 4px 26px; border: 2px solid currentColor; }
+.bc-btns .btn { white-space: nowrap; font-size: clamp(15px, 2.6vmin, 22px); }

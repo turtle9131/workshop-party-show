@@ -149,8 +149,16 @@ let bzGave = null; // 🎤 사회자 폰 [↩️ 취소]용: 방금 버저 정�
 function buzzCorrect(f) {
   bzGave = null;
   if (S.pre && (current === 'music' || current === 'ost')) {
-    const b = main.querySelector(`[data-a="${S.dft ? 'dwho' : 'solo'}"][data-v="${CSS.escape(f.name)}"]`);
-    if (b) b.click(); else toast(`${f.name} 님이 참가자 명단에 없어요. 이름 버튼을 직접 눌러 주세요`, 3500);
+    // 폰에서 직접 입력한 이름 → 명단과 띄어쓰기만 다르면 명단 이름으로, 명단에 없으면 추가
+    const nz = (x) => String(x).replace(/\s+/g, '');
+    let nm = (S.players || []).find((x) => nz(x) === nz(f.name));
+    if (!nm) {
+      nm = f.name; S.players = [...(S.players || []), nm];
+      if (S.dft) { const n = S.players.length; S.dft.cap = [Math.ceil(n / 2), Math.floor(n / 2)]; } // 드래프트 정원 다시 계산
+      save(); toast(`👤 ${nm} 님을 참가자 명단에 추가했어요`, 2500);
+    }
+    const fn = actions[S.dft ? 'dwho' : 'solo'];
+    if (fn) fn(nm);
     return;
   }
   if (!(f.team >= 0)) { toast('팀이 없는 참가자예요. 팀 [정답] 버튼을 직접 눌러 주세요', 3500); return; }
@@ -159,7 +167,8 @@ function buzzCorrect(f) {
   remoteClick = true; // "누가 맞혔나요?" 대신 버저 누른 사람에게 바로 개인 포인트
   try { b.click(); } finally { remoteClick = false; }
   const ip = S.indivStep || 1;
-  addIndiv(f.name, f.team, ip); bzGave = { name: f.name, team: f.team, ip };
+  const nm = teamMembers(f.team).find((x) => x.replace(/\s+/g, '') === f.name.replace(/\s+/g, '')) || f.name;
+  addIndiv(nm, f.team, ip); bzGave = { name: nm, team: f.team, ip };
   toast(`🔔 ${f.name} 정답! 🏅 +${ip}점`, 2500);
 }
 
