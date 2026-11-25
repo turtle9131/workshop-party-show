@@ -139,7 +139,7 @@ function newRoom(kind, g, ht) {
 // ═══════════════════ 📱 폰 연결 (파티 게임) ═══════════════════
 // 행사 내내 하나만 씁니다. 참가자는 이름·팀으로 한 번 접속하면, 진행 화면이 여는 게임에 맞춰 폰 화면이 바뀝니다.
 // act(지금 진행 중인 것):
-//   idle  · buzz { first, exclude[] }  · bomb { cat, holder, live, boom }
+//   idle  · buzz { first, queue[], exclude[팀], out[id] }  (queue = 누른 순서, out = 틀려서 이번 문제 기회가 끝난 사람)  · bomb { cat, holder, live, boom }
 //   draw  { team, word, turn, drawer, strokes[] }  · allin { open, answers{0,1} }
 let P = null; // { ht, teamNames, roster, members: Map(id → {id, name, team, pt}), nextId, act, subs: Set }
 
@@ -159,13 +159,18 @@ function partyHostView() {
   const nm = (id) => (P.members.get(id) || {}).name || null;
   if (a.kind === 'bomb') { a.holderName = nm(a.holder); a.boomName = nm(a.boom); a.boomTeam = a.boom != null && P.members.get(a.boom) ? P.members.get(a.boom).team : null; }
   if (a.kind === 'draw') a.drawerName = nm(a.drawer);
-  if (a.kind === 'buzz' && a.first) a.first = { ...a.first };
+  if (a.kind === 'buzz') { a.first = a.first ? { ...a.first } : null; a.queue = a.queue.map((x) => ({ ...x })); a.out = a.out.slice(); }
   return { t: 'host', teamNames: P.teamNames, members: pMembers().map((m) => ({ id: m.id, name: m.name, team: m.team, online: pOnline(m.id) })), act: a };
 }
 function partyPlayerView(m) {
   const a = P.act, v = { t: 'party', me: { id: m.id, name: m.name, team: m.team }, teamNames: P.teamNames, kind: a.kind };
   const nm = (id) => (P.members.get(id) || {}).name || '';
-  if (a.kind === 'buzz') { v.first = a.first; v.excluded = a.exclude.includes(m.team); }
+  if (a.kind === 'buzz') {
+    v.first = a.first; v.excluded = a.out.includes(m.id) || (m.team >= 0 && a.exclude.includes(m.team));
+    v.teamOut = m.team >= 0 && a.exclude.includes(m.team);
+    v.rank = a.queue.findIndex((x) => x.id === m.id) + 1; // 몇 번째로 눌렀는지 (0 = 안 누름)
+    v.done = !!a.done;
+  }
   if (a.kind === 'bomb') {
     v.cat = a.cat; v.live = a.live; v.holding = a.live && a.holder === m.id; v.holderName = nm(a.holder);
     v.boom = a.boom != null ? { name: nm(a.boom), me: a.boom === m.id } : null;
@@ -375,7 +380,7 @@ async function partyApi(route, req, res, q) {
   }
   if (route === 'lobby') {
     if (!P) return json(res, 404, { error: 'noparty' });
-    return json(res, 200, { teamNames: P.teamNames, roster: P.roster, taken: pMembers().map((m) => m.name) });
+    return json(res, 200, { teamNames: P.teamNames, roster: P.roster, players: P.roster ? null : P.players || null, taken: pMembers().map((m) => m.name) });
   }
   // 그리는 팀 폰: 지금까지 그린 그림 (릴레이로 차례가 왔을 때 이어 그리기용)
   if (route === 'strokes') {
@@ -392,16 +397,24 @@ async function partyApi(route, req, res, q) {
     const teamNames = Array.isArray(b.teamNames) ? b.teamNames.slice(0, 2).map((x) => String(x).slice(0, 12)) : ['A팀', 'B팀'];
     const roster = Array.isArray(b.roster) && b.roster.length === 2 ? b.roster.map((t) => (Array.isArray(t) ? t.map((x) => String(x).slice(0, 20)).slice(0, 40) : [])) : null;
     const rk = typeof b.rk === 'string' && b.rk.length >= 12 ? b.rk.slice(0, 64) : null; // 사회자 리모컨 키
+    // 팀이 정해지기 전(사전 게임 개인전)에는 이름 명단만 받음 → 폰은 팀 없이(team -1) 접속
+    const players = !roster && Array.isArray(b.players) ? b.players.slice(0, 60).map((x) => String(x).slice(0, 20)) : null;
+    const syncTeams = () => { // 명단이 바뀌면 이미 접속한 폰의 팀도 맞춤
+      for (const m of P.members.values()) {
+        if (roster) { const t = roster[0].includes(m.name) ? 0 : roster[1].includes(m.name) ? 1 : -1; if (t >= 0) m.team = t; }
+        else if (players) m.team = -1;
+      }
+    };
     if (P && P.ht === b.ht) {
       if (rk && rk !== P.rk) { // 키를 바꾸면 기존 리모컨은 끊김
         for (const s of [...P.subs]) if (s.remote) { P.subs.delete(s); s.res.end(); }
         P.rk = rk;
       }
-      P.teamNames = teamNames; P.roster = roster; pBroadcast(); return json(res, 200, { ht: P.ht });
+      P.teamNames = teamNames; P.roster = roster; P.players = players; syncTeams(); pBroadcast(); return json(res, 200, { ht: P.ht });
     }
     if (P && !b.force) return json(res, 409, { error: 'exists' });
     if (P) for (const s of P.subs) s.res.end();
-    P = { ht: typeof b.ht === 'string' && b.ht.length >= 16 ? b.ht : tok(), rk, teamNames, roster, members: new Map(), nextId: 1, act: { kind: 'idle' }, subs: new Set() };
+    P = { ht: typeof b.ht === 'string' && b.ht.length >= 16 ? b.ht : tok(), rk, teamNames, roster, players, members: new Map(), nextId: 1, act: { kind: 'idle' }, subs: new Set() };
     console.log('[폰 연결] 방을 열었습니다');
     return json(res, 200, { ht: P.ht });
   }
@@ -426,7 +439,7 @@ async function partyApi(route, req, res, q) {
   // 참가자: 이름·팀으로 접속 (같은 이름은 한 명만)
   if (route === 'join') {
     const name = String(b.name || '').trim().slice(0, 20), team = Number(b.team);
-    if (!name || !(team === 0 || team === 1)) return json(res, 400, { error: 'input' });
+    if (!name || !(team === 0 || team === 1 || team === -1)) return json(res, 400, { error: 'input' });
     if (pMembers().some((m) => m.name === name)) return json(res, 409, { error: 'taken' });
     const m = { id: P.nextId++, name, team, pt: tok() };
     P.members.set(m.id, m);
@@ -441,10 +454,12 @@ async function partyApi(route, req, res, q) {
   if (['buzz', 'pass', 'stroke', 'clear', 'answer'].includes(route)) {
     if (!me) return json(res, 403, { error: 'auth' });
     if (route === 'buzz') {
-      if (a.kind !== 'buzz' || a.first || a.exclude.includes(me.team)) return json(res, 409, { error: 'late' });
-      a.first = { id: me.id, name: me.name, team: me.team };
+      if (a.kind !== 'buzz' || a.done || a.out.includes(me.id) || (me.team >= 0 && a.exclude.includes(me.team))) return json(res, 409, { error: 'late' });
+      let k = a.queue.findIndex((x) => x.id === me.id);
+      if (k < 0) { a.queue.push({ id: me.id, name: me.name, team: me.team }); k = a.queue.length - 1; }
+      if (!a.first) a.first = a.queue[0];
       pBroadcast();
-      return json(res, 200, { ok: true, first: true });
+      return json(res, 200, { ok: true, rank: k + 1, first: a.first.id === me.id });
     }
     if (route === 'pass') {
       const to = P.members.get(Number(b.to));
@@ -484,8 +499,18 @@ async function partyApi(route, req, res, q) {
   if (route === 'act') {
     const op = b.op;
     if (op === 'idle') P.act = { kind: 'idle' };
-    else if (op === 'buzz') P.act = { kind: 'buzz', first: null, exclude: [] };
-    else if (op === 'buzzReset') { if (a.kind !== 'buzz') P.act = { kind: 'buzz', first: null, exclude: [] }; else { a.first = null; a.exclude = Array.isArray(b.exclude) ? b.exclude.filter((t) => t === 0 || t === 1) : []; } }
+    else if (op === 'buzz' || (op === 'buzzReset' && a.kind !== 'buzz')) P.act = { kind: 'buzz', first: null, queue: [], exclude: [], out: [] };
+    else if (op === 'buzzReset') Object.assign(a, { done: false, first: null, queue: [], out: [], exclude: Array.isArray(b.exclude) ? b.exclude.filter((t) => t === 0 || t === 1) : [] });
+    else if (op === 'buzzDone') { if (a.kind === 'buzz') a.done = true; } // 정답 처리됨 → 다음 문제까지 잠금
+    else if (op === 'buzzWrong') {
+      // 오답: 틀린 사람은 이번 문제 기회 끝. mode 'team' 이면 그 팀 전체가 끝 → 상대 팀에게 기회
+      if (a.kind !== 'buzz' || !a.first || a.done) return json(res, 409, { error: 'kind' });
+      const f = a.first;
+      if (!a.out.includes(f.id)) a.out.push(f.id);
+      if (b.mode === 'team' && f.team >= 0 && !a.exclude.includes(f.team)) a.exclude.push(f.team);
+      a.queue = a.queue.filter((x) => !a.out.includes(x.id) && !(x.team >= 0 && a.exclude.includes(x.team)));
+      a.first = a.queue[0] || null; // 다음으로 누른 사람이 있으면 바로 그 사람 차례, 없으면 버저가 다시 열림
+    }
     else if (op === 'bomb') P.act = { kind: 'bomb', cat: String(b.cat || '').slice(0, 40), holder: null, live: false, boom: null, passes: 0 };
     else if (op === 'bombCat') { if (a.kind === 'bomb') a.cat = String(b.cat || '').slice(0, 40); }
     else if (op === 'bombStart') {

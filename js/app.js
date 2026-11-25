@@ -143,6 +143,26 @@ function showWho(onlyCount) {
   };
 }
 
+// 🔔 폰 버저 [⭕ 정답]: 지금 화면의 정답 버튼을 대신 누르고, 누른 사람에게 개인 포인트
+//   사전 게임(개인전)·OST 드래프트는 이름 버튼, 팀전은 그 팀 [정답] 버튼 + 개인 +n점
+let bzGave = null; // 🎤 사회자 폰 [↩️ 취소]용: 방금 버저 정답으로 준 개인 포인트
+function buzzCorrect(f) {
+  bzGave = null;
+  if (S.pre && (current === 'music' || current === 'ost')) {
+    const b = main.querySelector(`[data-a="${S.dft ? 'dwho' : 'solo'}"][data-v="${CSS.escape(f.name)}"]`);
+    if (b) b.click(); else toast(`${f.name} 님이 참가자 명단에 없어요. 이름 버튼을 직접 눌러 주세요`, 3500);
+    return;
+  }
+  if (!(f.team >= 0)) { toast('팀이 없는 참가자예요. 팀 [정답] 버튼을 직접 눌러 주세요', 3500); return; }
+  const b = main.querySelector(`[data-a="win"][data-v="${f.team}"]`);
+  if (!b || b.disabled) { toast('이 화면에서는 정답 버튼을 직접 눌러 주세요', 3000); return; }
+  remoteClick = true; // "누가 맞혔나요?" 대신 버저 누른 사람에게 바로 개인 포인트
+  try { b.click(); } finally { remoteClick = false; }
+  const ip = S.indivStep || 1;
+  addIndiv(f.name, f.team, ip); bzGave = { name: f.name, team: f.team, ip };
+  toast(`🔔 ${f.name} 정답! 🏅 +${ip}점`, 2500);
+}
+
 // 참가자 폰으로 점수 보내기 (노트북 서버 + 📱 폰 연결이 열려 있을 때만)
 let pushT = null;
 function scorePayload() {
@@ -646,6 +666,7 @@ screens.teams = () => {
         const had = S.teams.some((t) => t.score) || Object.values(S.indiv).some((x) => x.p);
         if (had && confirm('지난 팀 점수와 개인 포인트가 남아 있어요. 모두 0점으로 지우고 시작할까요?')) { S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; renderScore(); }
         S.players = names; S.pre = { pts: {}, log: [] }; S.dft = null; S.roster = null; S.leaders = null; save(); pushScores();
+        if (typeof Party !== 'undefined' && Party.h) Party.open(); // 폰은 팀 없이 이름만 골라 접속
         go('music'); toast('🎵 사전 게임 시작! 맞힌 사람 이름을 누르면 +1점', 3000);
       },
     };
@@ -3260,18 +3281,19 @@ function onRemote(v) {
   } else if (v.op === 'act') {
     // 진행 화면의 실제 버튼을 대신 누름 → 점수·효과음·비활성 상태가 직접 누를 때와 똑같이 동작
     const sel = `[data-a="${CSS.escape(v.a)}"]` + (v.v ? `[data-v="${CSS.escape(v.v)}"]` : '');
-    const btn = main.querySelector(sel);
+    const btn = main.querySelector(sel) || document.querySelector('#buzzcover ' + sel); // 🔔 버저 창 버튼도
     if (!btn || btn.disabled) { toast('🎤 지금 화면에서는 누를 수 없는 버튼이에요'); pushCtl(); return; }
     const before = S.teams.map((t) => t.score);
     remoteClick = true;
     try { btn.click(); } finally { remoteClick = false; }
     const d = S.teams.map((t, k) => t.score - before[k]);
-    const who = v.a === 'win' ? v.who : [];
-    who.forEach((nm) => addIndiv(nm, v.team, v.ip));
+    let who = v.a === 'win' ? v.who : [], ip = v.ip, team = v.team;
+    who.forEach((nm) => addIndiv(nm, team, ip));
+    if (v.a === 'bzOk' && bzGave) { who = [bzGave.name]; ip = bzGave.ip; team = bzGave.team; bzGave = null; } // 버저 정답은 이미 줌 → 취소 기록만
     if (d.some(Boolean) || who.length) {
-      rlog.push({ op: 'delta', d, who, team: v.team, ip: v.ip });
+      rlog.push({ op: 'delta', d, who, team, ip });
       const got = d.map((x, k) => (x ? `${S.teams[k].name} ${x > 0 ? '+' : ''}${x}점` : '')).filter(Boolean).join(' · ');
-      toast(`🎤 ${got}${who.length ? ` · ${who.length > 3 ? '팀 전원' : who.join(', ')} +${v.ip}` : ''}`);
+      toast(`🎤 ${got}${who.length ? ` · ${who.length > 3 ? '팀 전원' : who.join(', ')} +${ip}` : ''}`);
     }
   } else if (v.op === 'undo') {
     const x = rlog.pop();

@@ -147,7 +147,7 @@ const Party = {
     if (!NET.info) return false;
     try {
       const roster = S.roster && S.roster.length === 2 ? S.roster : null;
-      const j = await NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster, rk: S.rk, force: !!force });
+      const j = await NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster, players: Party.soloList(), rk: S.rk, force: !!force });
       S.partyHt = j.ht; save();
       if (typeof pushScores === 'function') pushScores(); // 폰에 현재 점수 보내기
     } catch (e) {
@@ -160,11 +160,13 @@ const Party = {
       Party.h = NET.stream(`/api/p/events?ht=${S.partyHt}`, (v) => {
         if (v.t === 'host') { Party.st = v; Party.badge(); }
         Party.emit(v);
-      }, () => NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster: S.roster || null, rk: S.rk })
+      }, () => NET.post('/api/p/open', { ht: S.partyHt, teamNames: S.teams.map((t) => t.name), roster: S.roster || null, players: Party.soloList(), rk: S.rk })
         .then(() => { if (typeof pushScores === 'function') pushScores(); }).catch(() => null));
     }
     return true;
   },
+  // 팀이 정해지기 전(🎵 사전 게임 · 🎬 OST 드래프트)에는 이름만 골라 개인으로 접속
+  soloList() { return !S.roster && S.pre && Array.isArray(S.players) ? S.players : null; },
   act(op, extra = {}) {
     if (!S.partyHt || !NET.info) return Promise.resolve(null);
     return NET.post('/api/p/act', { ht: S.partyHt, op, ...extra }).catch(() => null);
@@ -185,41 +187,82 @@ const Party = {
   },
 
   // ── 🔔 버저 (노래·OST·초성·사진 퀴즈) ──
-  // 화면에 들어갈 때 Party.buzzer(onBuzz) → 누가 먼저 누르면 위쪽에 큰 배너가 뜨고 onBuzz(team)가 불림
+  // 화면에 들어갈 때 Party.buzzer(onBuzz). 누가 누르면 퀴즈 화면을 덮는 큰 창에 이름이 뜨고 onBuzz(team)가 불림
+  // 창의 버튼: ⭕ 정답(buzzCorrect: 그 게임의 정답 처리 + 개인 포인트) · ❌ 다음 사람 · ❌ 상대 팀 · 🔁 모두 다시
   buzzer(onBuzz) {
     if (!Party.st) return;
     Party.act('buzz');
-    let shown = null;
+    let shown = '';
     const off = Party.on((v) => {
       if (v.t !== 'host' || !v.act || v.act.kind !== 'buzz') return;
-      const f = v.act.first, key = f ? f.id + ':' + f.name : null;
+      const a = v.act, f = a.first;
+      const key = JSON.stringify([f && f.id, a.queue.map((x) => x.id), a.exclude, !!a.done]);
       if (key === shown) return;
+      const prevFirst = shown ? JSON.parse(shown)[0] : null;
       shown = key;
-      if (f) {
-        Party.lastBuzz = { name: f.name, team: f.team, at: Date.now() }; // "누가 맞혔나요?"에서 맨 앞에 표시
-        sfx.go(); flash(f.team ? 'var(--B)' : 'var(--A)');
-        if (onBuzz) onBuzz(f.team);
-        Party.banner(f, v.act.exclude);
-      } else Party.banner(null);
+      if (a.done) Party.cover(null);
+      else if (f) {
+        if (f.id !== prevFirst) { // 새로 답할 사람
+          Party.lastBuzz = { name: f.name, team: f.team, at: Date.now() }; // "누가 맞혔나요?"에서 맨 앞에 표시
+          sfx.go(); flash(f.team === 1 ? 'var(--B)' : f.team === 0 ? 'var(--A)' : 'var(--gold)');
+          if (onBuzz) onBuzz(f.team);
+        }
+        Party.cover(a);
+      } else Party.cover(null, a);
     });
-    onCleanup(() => { off(); Party.banner(null); Party.act('idle'); });
+    onCleanup(() => { off(); Party.cover(null); Party.act('idle'); });
   },
-  // 다음 문제·정답 처리 때 버저를 다시 엶
-  buzzReset(exclude) { if (Party.st) { Party.banner(null); Party.act('buzzReset', { exclude: exclude || [] }); } },
-  banner(f, exclude = []) {
-    let el = document.getElementById('buzzbar');
-    if (!f) { if (el) el.remove(); return; }
-    if (!el) { el = document.createElement('div'); el.id = 'buzzbar'; document.body.appendChild(el); }
-    const other = 1 - f.team, canOther = !exclude.includes(other);
-    el.className = 'buzzbar ' + (f.team ? 'B' : 'A');
-    el.innerHTML = `<div class="who">🔔 ${esc(S.teams[f.team].name)} · ${esc(f.name)}</div>
-      <div class="row">
-        ${canOther ? `<button class="btn" data-b="other">❌ 오답 → ${esc(S.teams[other].name)} 기회</button>` : ''}
-        <button class="btn" data-b="all">🔁 다시 열기</button>
+  // 다음 문제로 넘어갈 때 버저를 새로 엶 (누른 순서·오답 기록 모두 지움)
+  buzzReset(exclude) { if (Party.st) { Party.cover(null); Party.act('buzzReset', { exclude: exclude || [] }); } },
+  // 정답 처리 후: 창을 닫고 이 문제의 버저를 잠금 (다음 문제에서 buzzReset으로 다시 열림)
+  banner(f) { if (!f && Party.st) { Party.cover(null); Party.act('buzzDone'); } },
+  ctlSaved: null,
+  cover(a, openAct) {
+    let el = document.getElementById('buzzcover');
+    if (!a) {
+      if (el) el.remove();
+      if (Party.ctlSaved) { CTL = Party.ctlSaved; Party.ctlSaved = null; pushCtl(); }
+      // 오답 뒤 버저가 다시 열린 상태면 위쪽에 작게 알림
+      const out = openAct && (openAct.out.length || openAct.exclude.length);
+      let pill = document.getElementById('buzzopen');
+      if (out) {
+        if (!pill) { pill = document.createElement('div'); pill.id = 'buzzopen'; pill.className = 'buzzopen'; document.body.appendChild(pill); }
+        pill.textContent = openAct.exclude.length && S.roster ? `🔔 ${S.teams[1 - openAct.exclude[0]].name} 기회! 버저를 누르세요` : '🔔 다른 사람 기회! 버저를 누르세요';
+      } else if (pill) pill.remove();
+      return;
+    }
+    const pill = document.getElementById('buzzopen'); if (pill) pill.remove();
+    const f = a.first, team = f.team >= 0 && S.roster, rest = a.queue.slice(1);
+    const other = team ? 1 - f.team : -1, canTeam = team && !a.exclude.includes(other);
+    const tn = (x) => (x.team >= 0 && S.roster ? S.teams[x.team].name : '');
+    if (!el) { el = document.createElement('div'); el.id = 'buzzcover'; document.body.appendChild(el); }
+    el.className = 'buzzcover ' + (f.team === 1 ? 'B' : f.team === 0 ? 'A' : 'S');
+    const nextL = rest.length ? `❌ 오답 → 다음: ${rest[0].name}` : '❌ 오답 → 다른 사람';
+    el.innerHTML = `<div class="bc-in">
+        <div class="bc-bell">🔔</div>
+        ${tn(f) ? `<div class="bc-team">${esc(tn(f))}</div>` : ''}
+        <div class="bc-name">${esc(f.name)}</div>
+        <div class="bc-say">정답을 말해 주세요!</div>
+        ${rest.length ? `<div class="bc-queue">대기 ${rest.map((x, k) => `<span>${k + 2}. ${esc(x.name)}</span>`).join('')}</div>` : ''}
+        <div class="row bc-btns">
+          <button class="btn big good" data-a="bzOk">⭕ 정답</button>
+          <button class="btn big bad" data-a="bzNext">${esc(nextL)}</button>
+          ${canTeam ? `<button class="btn big ${other ? 'B' : 'A'}" data-a="bzTeam">❌ 오답 → ${esc(S.teams[other].name)} 기회</button>` : ''}
+        </div>
+        <button class="btn bc-reset" data-a="bzAll">🔁 모두 다시 누르기</button>
       </div>`;
-    el.querySelector('[data-b="all"]').onclick = () => Party.buzzReset([]);
-    const o = el.querySelector('[data-b="other"]');
-    if (o) o.onclick = () => Party.buzzReset([...new Set([...exclude, f.team])]);
+    const acts = {
+      bzOk: () => { const g = { ...f }; Party.banner(null); if (typeof buzzCorrect === 'function') buzzCorrect(g); },
+      bzNext: () => { sfx.bad(); flash('var(--bad)'); Party.act('buzzWrong', { mode: 'next' }); },
+      bzTeam: () => { sfx.bad(); flash('var(--bad)'); Party.act('buzzWrong', { mode: 'team' }); },
+      bzAll: () => Party.buzzReset([]),
+    };
+    el.onclick = (e) => { const b = e.target.closest('[data-a]'); if (b && acts[b.dataset.a]) acts[b.dataset.a](); };
+    // 🎤 사회자 폰에도 같은 버튼
+    if (!Party.ctlSaved) Party.ctlSaved = CTL;
+    CTL = { ...Party.ctlSaved, q: `🔔 ${tn(f) ? tn(f) + ' · ' : ''}${f.name}`, revealed: false, win: null,
+      can: [{ a: 'bzOk', l: '⭕ 정답', k: 'big' }, { a: 'bzNext', l: nextL }, ...(canTeam ? [{ a: 'bzTeam', l: `❌ → ${S.teams[other].name} 기회` }] : []), { a: 'bzAll', l: '🔁 모두 다시' }] };
+    pushCtl();
   },
 };
 
@@ -238,9 +281,9 @@ function phonesScreen() {
       return;
     }
     const url = `${NET.origin()}/play.html`;
-    const list = () => [0, 1].map((t) => `
-      <div class="tcol ${t ? 'B' : 'A'}" style="min-height:0">
-        <div class="tname">${esc(S.teams[t].name)} <small>${Party.members(t).length}명</small></div>
+    const list = () => (Party.members(-1).length ? [0, 1, -1] : [0, 1]).map((t) => `
+      <div class="tcol ${t < 0 ? '' : t ? 'B' : 'A'}" style="min-height:0">
+        <div class="tname">${t < 0 ? '👤 개인전' : esc(S.teams[t].name)} <small>${Party.members(t).length}명</small></div>
         ${Party.members(t).map((m) => `<button class="tmember" data-a="kick" data-v="${m.id}" style="width:100%;border:0;cursor:pointer">${m.online ? '✅' : '🟡'} ${esc(m.name)}</button>`).join('')}
       </div>`).join('');
     main.innerHTML = `
