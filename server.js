@@ -206,7 +206,7 @@ function cleanCtl(c) {
   return {
     title: str(c.title, 40), q: str(c.q, 40), answer: str(c.answer, 80), detail: str(c.detail, 80), revealed: !!c.revealed,
     win: c.win && Number.isFinite(+c.win.pts) ? { pts: Math.round(+c.win.pts) } : null,
-    can: (Array.isArray(c.can) ? c.can : []).slice(0, 16).map((b) => ({ a: str(b && b.a, 20), v: str(b && b.v, 20), l: str(b && b.l, 30), k: str(b && b.k, 10) })),
+    can: (Array.isArray(c.can) ? c.can : []).slice(0, 24).map((b) => ({ a: str(b && b.a, 20), v: str(b && b.v, 20), l: str(b && b.l, 30), k: str(b && b.k, 10) })),
   };
 }
 function pBroadcast() {

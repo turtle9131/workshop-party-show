@@ -180,7 +180,7 @@ function go(name, ...args) {
 // ── 🎤 사회자 폰 진행 버튼 ──
 // 각 화면이 "지금 누를 수 있는 버튼 + 현재 정답"을 setCtl로 알려 주면 사회자 폰에만 보냄 (참가자 폰에는 안 감)
 // can: [{ a: data-a, v: data-v, l: 버튼 글자, k: 'big' 등 }], win: { pts } 이면 팀 정답 버튼, answer/detail: 정답
-const SCREEN_NAMES = { home: '🏠 홈', sound: '🔊 사운드 준비', settings: '⚙️ 설정', scores: '🏅 점수판', awards: '🏆 시상식', phones: '📱 폰 연결', remote: '🎤 사회자 폰 연결' };
+const SCREEN_NAMES = { home: '🏠 홈', sound: '🔊 사운드 준비', settings: '⚙️ 설정', scores: '🏅 점수판', awards: '🏆 시상식', preResult: '👑 리더 발표', phones: '📱 폰 연결', remote: '🎤 사회자 폰 연결' };
 let CTL = null, ctlT = null;
 function setCtl(c) { CTL = { title: CTL ? CTL.title : '', can: [], ...c }; pushCtl(); }
 function pushCtl() {
@@ -368,6 +368,47 @@ const AUDIO_QUIZ = {
     hints: [{ label: '장르·연도 힌트', text: (s) => `${s.type} · ${s.year}` }, { label: '초성 힌트', big: true, text: (s) => chosung(s.work) }],
   },
 };
+
+// ═══════════ 🎵 사전 게임(노래 퀴즈 개인전) → 👑 리더 발표 → 🎬 OST 드래프트 ═══════════
+// S.pre = { pts: {이름: 점수}, log: [이름…] }   팀이 정해지기 전의 개인 점수 (드래프트가 끝나면 개인 포인트로 옮김)
+// S.dft = { L: [A리더, B리더], teams: [[…], […]], cap: [A정원, B정원], log: [{ n, t, who }] }
+//   OST 문제를 리더·팀원이 맞히면 그 팀 리더가 1명 지목, 아직 안 뽑힌 사람이 맞히면 본인이 팀을 고름
+const prePts = (n) => (S.pre && S.pre.pts[n]) || 0;
+const preOn = () => !!(S.pre && !S.dft);
+function dftTeamOf(n) { const D = S.dft; return !D ? -1 : D.teams[0].includes(n) ? 0 : D.teams[1].includes(n) ? 1 : -1; }
+function dftPool() { return (S.players || []).filter((n) => dftTeamOf(n) < 0); }
+function preRank() {
+  return (S.players || []).map((n) => ({ n, p: prePts(n) })).sort((a, b) => b.p - a.p || (S.players.indexOf(a.n) - S.players.indexOf(b.n)));
+}
+function dftStart(L) {
+  const n = (S.players || []).length;
+  S.dft = { L: L.slice(), teams: [[L[0]], [L[1]]], cap: [Math.ceil(n / 2), Math.floor(n / 2)], log: [] };
+  S.leaders = L.slice();
+  if (S.leaderTeamName !== false) { S.teams[0].name = `${L[0]}팀`.slice(0, 12); S.teams[1].name = `${L[1]}팀`.slice(0, 12); renderScore(); }
+  save();
+}
+// 1명 배정. 한 팀 정원이 차면 남은 사람은 모두 상대 팀으로 → 드래프트 끝. 끝나면 { teams, L, auto } 반환
+function dftAssign(n, t, who) {
+  const D = S.dft;
+  D.teams[t].push(n); D.log.push({ n, t, who });
+  if (S.pre) S.pre.pts[who] = prePts(who) + 1;
+  let pool = dftPool(), auto = [];
+  for (const k of [0, 1]) if (pool.length && D.teams[k].length >= D.cap[k]) { D.teams[1 - k].push(...pool); auto = pool.map((x) => ({ n: x, t: 1 - k })); pool = []; }
+  save();
+  if (pool.length) return null;
+  // ── 팀 완성: 명단·리더·개인 포인트 확정 → 이제부터 팀전 ──
+  const res = { teams: D.teams.map((a) => a.slice()), L: D.L.slice(), auto };
+  S.roster = res.teams; S.leaders = res.L;
+  Object.entries((S.pre && S.pre.pts) || {}).forEach(([nm, p]) => {
+    const k = res.teams[0].includes(nm) ? 0 : res.teams[1].includes(nm) ? 1 : -1;
+    if (k < 0 || !p) return;
+    const x = S.indiv[nm] || (S.indiv[nm] = { t: k, p: 0 }); x.t = k; x.p += p;
+  });
+  S.pre = null; S.dft = null; save(); pushScores();
+  if (typeof Party !== 'undefined' && Party.h) Party.open(); // 폰 연결 명단·팀 이름 갱신
+  return res;
+}
+const nameBtns = (a, cls) => `<div class="ngrid sm">${(S.players || []).map((n) => `<button class="nbtn${cls ? cls(n) : ''}" data-a="${a}" data-v="${esc(n)}">${S.leaders && S.dft && S.leaders.includes(n) ? '👑' : ''}${esc(n)}<small>${prePts(n)}점</small></button>`).join('')}</div>`;
 screens.music = (kind = 'music') => {
   const Q = AUDIO_QUIZ[kind];
   // 필터(전체/드라마/영화)별 진행 위치 + 이미 푼 곡을 기억 → 필터를 오가거나 화면을 나갔다 와도 이어서, 푼 곡은 건너뜀
@@ -379,6 +420,9 @@ screens.music = (kind = 'music') => {
   const orderFor = (f) => seededOrder(list.length, kind + (f ? ':' + f : ''), S.set);
   let order = orderFor(filter);
   let i = 0, hint = 0, revealed = false, playing = false;
+  let pend = null, fin = null; // OST 드래프트: 방금 맞힌 사람 / 팀 완성 결과
+  const isSolo = () => kind === 'music' && preOn();
+  const isDft = () => kind === 'ost' && !!S.dft;
   const song = () => list[order[i]];
   const sid = (s) => s.id + '|' + Q.answer(s);
   const dk = () => kind + ':' + S.set, pk = () => dk() + ':' + (filter || '');
@@ -400,10 +444,12 @@ screens.music = (kind = 'music') => {
       <div class="screen">
         <div class="head"><h2>${Q.title}</h2>${Q.filters
           ? `<div class="chips">${Q.filters.map((f) => `<button class="chip ${f === filter ? 'on' : ''}" data-a="filter" data-v="${f}">${f}</button>`).join('')}</div>`
-          : `<span class="sub">${Q.sub}</span>`}</div>
+          : `<span class="sub">${isSolo() ? '👤 사전 게임 · 개인전 — 1·2등이 리더!' : Q.sub}</span>`}</div>
         <div class="stage-wrap">
           <div class="stage">
             <div class="qno">Q ${i + 1} <small style="font-size:.6em">· 남은 ${leftCount()} / ${list.length}</small></div>
+            ${isSolo() ? `<div class="pill dstat">${preRank().slice(0, 3).filter((x) => x.p).map((x, k) => `${'🥇🥈🥉'.slice(k * 2, k * 2 + 2)} ${esc(x.n)} ${x.p}`).join(' · ') || '🎤 먼저 맞히는 사람이 점수!'}</div>` : ''}
+            ${isDft() ? `<div class="pill dstat"><span style="color:var(--A)">👑 ${esc(S.dft.L[0])} ${S.dft.teams[0].length}/${S.dft.cap[0]}</span> · <span style="color:var(--B)">👑 ${esc(S.dft.L[1])} ${S.dft.teams[1].length}/${S.dft.cap[1]}</span> · 남은 ${dftPool().length}명</div>` : ''}
             <div class="disc ${playing ? 'spin' : ''}" id="disc"></div>
             <div class="bar"><i id="prog"></i></div>
             ${revealed ? '' : Q.hints.slice(0, hint).map((h) => `<div class="${h.big ? 'hint' : 'pill'} pop">${esc(h.text(s))}</div>`).join('')}
@@ -424,10 +470,16 @@ screens.music = (kind = 'music') => {
               <button class="btn gold" data-a="hint" ${hint >= Q.hints.length ? 'disabled' : ''}>💡 ${hint < Q.hints.length ? Q.hints[hint].label : '힌트 끝'}</button>
               <button class="btn" data-a="reveal">👀 정답</button>
             </div>
-            <div class="row">
+            ${isSolo() ? `
+            <p class="mini">🙋 맞힌 사람을 누르세요 (+1점)</p>${nameBtns('solo')}
+            <div class="row"><button class="btn" data-a="soloUndo" ${S.pre.log.length ? '' : 'disabled'}>↩️ 점수 취소</button><button class="btn gold" data-a="preEnd">🏁 사전 게임 끝</button></div>`
+            : isDft() ? `
+            <p class="mini">🙋 맞힌 사람 → 한 명 데려오기 (+1점)</p>${nameBtns('dwho', (n) => { const t = dftTeamOf(n); return t === 0 ? ' tA' : t === 1 ? ' tB' : ''; })}
+            <div class="row"><button class="btn" data-a="dundo" ${S.dft.log.length ? '' : 'disabled'}>↩️ 드래프트 취소</button></div>`
+            : `<div class="row">
               <button class="btn A" data-a="win" data-v="0">${esc(S.teams[0].name)} 정답</button>
               <button class="btn B" data-a="win" data-v="1">${esc(S.teams[1].name)} 정답</button>
-            </div>
+            </div>`}
             <div class="row">
               <button class="btn" data-a="prev" ${i === 0 ? 'disabled' : ''}>◀ 이전</button>
               <button class="btn" data-a="next">다음 ▶</button>
@@ -435,7 +487,22 @@ screens.music = (kind = 'music') => {
             </div>
           </div>
         </div>
+        ${pend && isDft() ? dftSheet() : fin ? finSheet() : ''}
       </div>`;
+    if (pend && isDft()) {
+      const t = dftTeamOf(pend), D = S.dft;
+      return setCtl({ q: `🎉 ${pend} 정답!`, answer: t >= 0 ? `👑 ${D.L[t]} 리더가 고를 차례` : `${pend} 님이 팀을 고를 차례`, detail: Q.answer(s), revealed: true,
+        can: [...(t >= 0 ? dftPool().map((n) => ({ a: 'dtake', v: n, l: n })) : [0, 1].filter((k) => D.teams[k].length < D.cap[k]).map((k) => ({ a: 'djoin', v: String(k), l: `→ 👑${D.L[k]}팀`, k: 'big' }))), { a: 'dcancel', l: '✖ 잘못 눌렀어요' }] });
+    }
+    if (fin) return setCtl({ q: '⚔️ 팀 완성!', answer: `${fin.L[0]}팀 vs ${fin.L[1]}팀`, revealed: true, can: [{ a: 'ddone', l: '✅ 이대로 시작', k: 'big' }] });
+    const who = isSolo() ? (S.players || []).map((n) => ({ a: 'solo', v: n, l: `🙋 ${n} +1` }))
+      : isDft() ? (S.players || []).map((n) => ({ a: 'dwho', v: n, l: `🙋 ${n}` })) : null;
+    if (who) return setCtl({
+      q: `Q ${i + 1}${filter ? ` · ${filter}` : ''}${isSolo() ? ' · 개인전' : ' · 드래프트'}`, answer: Q.answer(s), detail: Q.detail(s), revealed,
+      can: [{ a: 'clip', v: '1', l: '1초' }, { a: 'clip', v: '3', l: '3초' }, { a: 'clip', v: '5', l: '5초' }, { a: 'stop', l: '■ 정지' },
+        ...(hint < Q.hints.length ? [{ a: 'hint', l: '💡 ' + Q.hints[hint].label }] : []), { a: 'reveal', l: '👀 정답 공개' },
+        { a: 'next', l: '다음 ▶', k: 'big' }, ...who],
+    });
     setCtl({
       q: `Q ${i + 1}${filter ? ` · ${filter}` : ''}`, answer: Q.answer(s), detail: Q.detail(s), revealed,
       win: revealed ? null : { pts: 1 },
@@ -447,6 +514,32 @@ screens.music = (kind = 'music') => {
         ...(i > 0 ? [{ a: 'prev', l: '◀ 이전' }] : []), { a: 'next', l: '다음 ▶', k: 'big' },
       ],
     });
+  }
+  function dftSheet() {
+    const D = S.dft, t = dftTeamOf(pend);
+    if (t >= 0) return `<div class="dsheet"><div class="dcard ${t ? 'B' : 'A'}">
+        <div class="dtitle">🎉 <b>${esc(pend)}</b> 정답! <span>👑 ${esc(D.L[t])} 리더가 데려갈 사람을 고르세요</span></div>
+        <div class="ngrid">${dftPool().map((n) => `<button class="nbtn" data-a="dtake" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        <div class="row"><button class="btn" data-a="dcancel">✖ 잘못 눌렀어요</button></div></div></div>`;
+    return `<div class="dsheet"><div class="dcard">
+        <div class="dtitle">🎉 <b>${esc(pend)}</b> 님 정답! <span>어느 팀으로 가시겠어요?</span></div>
+        <div class="row">${[0, 1].map((k) => `<button class="btn big ${k ? 'B' : 'A'}" data-a="djoin" data-v="${k}" ${D.teams[k].length >= D.cap[k] ? 'disabled' : ''}>👑 ${esc(D.L[k])}팀 <small>${D.teams[k].length}/${D.cap[k]}</small></button>`).join('')}</div>
+        <div class="row"><button class="btn" data-a="dcancel">✖ 잘못 눌렀어요</button></div></div></div>`;
+  }
+  function finSheet() {
+    const col = (k) => `<div class="tcol ${k ? 'B' : 'A'}"><div class="tname">👑 ${esc(fin.L[k])}팀 <small>${fin.teams[k].length}명</small></div>${fin.teams[k].map((n) => `<div class="tmember">${fin.L.includes(n) ? '👑 ' : ''}${esc(n)}</div>`).join('')}</div>`;
+    return `<div class="dsheet"><div class="dcard wide">
+        <div class="dtitle">⚔️ <b>팀 완성!</b> <span>${fin.auto.length ? `남은 ${fin.auto.map((x) => esc(x.n)).join(', ')} 님은 자동 배정 · ` : ''}이제부터 팀전입니다</span></div>
+        <div class="dteams">${col(0)}${col(1)}</div>
+        <button class="btn big primary" data-a="ddone">✅ 이대로 시작</button></div></div>`;
+  }
+  function pickDone(n, t, who) {
+    pend = null; sfx.fanfare(); flash(t ? 'var(--B)' : 'var(--A)');
+    const L = S.dft.L[t];
+    toast(n === who ? `🙋 ${n} 님 → 👑 ${L}팀!` : `👑 ${L} 리더 → ${n} 님 영입!`, 2500);
+    const r = dftAssign(n, t, who);
+    if (r) fin = r;
+    render();
   }
   const setProg = (p) => { const el = $('#prog'); if (el) el.style.width = (p * 100) + '%'; };
   onYtPlaying = (on) => { playing = on; const d = $('#disc'); if (d) d.classList.toggle('spin', on); };
@@ -471,6 +564,33 @@ screens.music = (kind = 'music') => {
     win: (t) => { addScore(Number(t), 1); sfx.ok(); flash(t === '0' ? 'var(--A)' : 'var(--B)'); revealed = true; markDone(); render(); playClip(song(), 0); Party.banner(null); },
     prev: () => move(-1),
     next: () => move(1),
+    // 🎵 사전 게임(개인전)
+    solo: (n) => {
+      if (!isSolo()) return;
+      S.pre.pts[n] = prePts(n) + 1; S.pre.log.push(n); save();
+      sfx.ok(); flash('var(--gold)'); toast(`🏅 ${n} +1점`);
+      if (!revealed) { revealed = true; markDone(); playClip(song(), 0); }
+      render(); Party.banner(null);
+    },
+    soloUndo: () => { const n = S.pre && S.pre.log.pop(); if (!n) return; S.pre.pts[n] = Math.max(0, prePts(n) - 1); save(); sfx.tick(); toast(`↩️ ${n} −1점`); render(); },
+    preEnd: () => go('preResult'),
+    // 🎬 OST 드래프트
+    dwho: (n) => {
+      if (!isDft() || pend) return;
+      pend = n; sfx.ok();
+      if (!revealed) { revealed = true; markDone(); playClip(song(), 0); }
+      render(); Party.banner(null);
+    },
+    dcancel: () => { pend = null; render(); },
+    dtake: (n) => { const t = dftTeamOf(pend); if (!pend || t < 0 || dftTeamOf(n) >= 0) return; pickDone(n, t, pend); },
+    djoin: (v) => { const t = Number(v), D = S.dft; if (!pend || dftTeamOf(pend) >= 0 || D.teams[t].length >= D.cap[t]) return; pickDone(pend, t, pend); },
+    dundo: () => {
+      const D = S.dft, x = D && D.log.pop(); if (!x) return;
+      D.teams[x.t].splice(D.teams[x.t].indexOf(x.n), 1);
+      if (S.pre) S.pre.pts[x.who] = Math.max(0, prePts(x.who) - 1);
+      save(); sfx.tick(); toast(`↩️ ${x.n} 님 선택 취소`); render();
+    },
+    ddone: () => { fin = null; sfx.fanfare(); render(); },
   };
   render(); cueSong(song());
 };
@@ -495,8 +615,10 @@ screens.teams = () => {
           </div>
           <div class="controls">
             <div class="pill" id="cnt" style="text-align:center">${players.length}명</div>
-            <button class="btn big gold" data-a="leaders">👑 리더 드래프트</button>
-            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">사전 게임으로 뽑힌 리더 2명이 번갈아 팀원을 뽑아요</p>
+            ${S.pre ? `<button class="btn big primary" data-a="resume">▶ ${S.dft ? '🎬 OST 드래프트' : '🎵 사전 게임'} 이어서</button>` : ''}
+            <button class="btn big gold" data-a="pre">🎵 사전 게임 → OST 드래프트</button>
+            <p class="sub" style="margin:0;text-align:center;color:var(--muted)">노래 퀴즈 개인전 1·2등이 리더,<br>OST 퀴즈를 맞힐 때마다 한 명씩 데려가요</p>
+            <button class="btn" data-a="leaders">👑 리더 직접 정하고 번갈아 뽑기</button>
             <button class="btn primary" data-a="draw">🎲 무작위로 나누기</button>
             ${S.roster ? '<button class="btn" data-a="last">📋 지난 결과 보기</button>' : ''}
           </div>
@@ -516,6 +638,16 @@ screens.teams = () => {
         S.players = names; save(); pickLeaders(names);
       },
       last: () => result(S.roster, true),
+      resume: () => go(S.dft ? 'ost' : 'music'),
+      pre: () => {
+        const names = parse(ta.value);
+        if (names.length < 4) { toast('4명 이상 입력해 주세요'); return; }
+        if (S.pre && !confirm('진행 중인 사전 게임을 지우고 새로 시작할까요?')) return;
+        const had = S.teams.some((t) => t.score) || Object.values(S.indiv).some((x) => x.p);
+        if (had && confirm('지난 팀 점수와 개인 포인트가 남아 있어요. 모두 0점으로 지우고 시작할까요?')) { S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; renderScore(); }
+        S.players = names; S.pre = { pts: {}, log: [] }; S.dft = null; S.roster = null; S.leaders = null; save(); pushScores();
+        go('music'); toast('🎵 사전 게임 시작! 맞힌 사람 이름을 누르면 +1점', 3000);
+      },
     };
   }
 
@@ -681,6 +813,62 @@ screens.teams = () => {
   }
 
   setup();
+};
+
+
+// ── 👑 사전 게임 결과 → 리더 발표 ──
+screens.preResult = () => {
+  if (!S.pre) return go('teams');
+  const list = preRank();
+  let L = list.slice(0, 2).map((x) => x.n), shown = false;
+  const tms = []; onCleanup(() => tms.forEach(clearTimeout));
+  const later = (fn, ms) => tms.push(setTimeout(fn, ms));
+  function draw() {
+    const tie2 = list[2] && list[1].p === list[2].p;
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>👑 리더 발표</h2><span class="sub">사전 게임(노래 퀴즈 개인전) 1·2등이 리더</span></div>
+        <div class="stage-wrap">
+          <div class="stage" style="gap:12px">
+            ${shown ? `<div class="result-big pop"><span style="color:var(--A)">👑 ${esc(L[0] || '?')}</span> <small style="font-size:.5em;color:var(--muted)">vs</small> <span style="color:var(--B)">👑 ${esc(L[1] || '?')}</span></div>
+              <div class="ngrid">${list.map((x, k) => { const j = L.indexOf(x.n); return `<button class="nbtn${j === 0 ? ' tA cur' : j === 1 ? ' tB cur' : ''}" data-a="pick" data-v="${esc(x.n)}">${j >= 0 ? '👑 ' : ''}${esc(x.n)}<small>${x.p}점</small></button>`; }).join('')}</div>
+              ${tie2 ? `<p class="notice" style="margin:0">⚖️ 2등 동점(${list.filter((x) => x.p === list[1].p).map((x) => esc(x.n)).join(', ')})! 가위바위보로 정하고, 이름을 눌러 리더를 바꾸세요</p>` : ''}`
+            : `<div class="medal" style="font-size:clamp(80px,24vmin,180px)">🥁</div><div class="sub">두구두구… 오늘의 리더는?</div>`}
+          </div>
+          <div class="controls">
+            ${shown ? `
+              <div class="pill" style="text-align:center"><span style="color:var(--A)">A 👑 ${esc(L[0] || '?')}</span> · <span style="color:var(--B)">B 👑 ${esc(L[1] || '?')}</span></div>
+              <p class="sub" style="margin:0;text-align:center;color:var(--muted)">이제 🎬 OST 퀴즈를 하면서<br>맞힌 쪽이 한 명씩 데려갑니다</p>
+              <button class="btn big primary" data-a="go" ${L.length < 2 ? 'disabled' : ''}>▶ OST 드래프트 시작</button>`
+            : '<button class="btn big gold" data-a="drum">🥁 리더 발표</button>'}
+            <button class="btn" data-a="back">↩️ 노래 퀴즈로 돌아가기</button>
+          </div>
+        </div>
+      </div>`;
+    setCtl({ q: '👑 리더 발표', answer: shown ? `${L[0] || '?'} · ${L[1] || '?'}` : '', can: shown ? (L.length === 2 ? [{ a: 'go', l: '▶ OST 드래프트 시작', k: 'big' }] : []) : [{ a: 'drum', l: '🥁 리더 발표', k: 'big' }] });
+  }
+  actions = {
+    drum: () => {
+      main.querySelector('.medal').classList.add('drumroll'); actions = {};
+      for (let k = 0; k < 14; k++) later(() => sfx.tick(), k * 110);
+      later(() => { shown = true; sfx.fanfare(); flash('var(--gold)'); draw(); setActs(); }, 1600);
+    },
+  };
+  function setActs() {
+    actions = {
+      pick: (v) => {
+        const j = L.indexOf(v);
+        if (j >= 0) L.splice(j, 1);
+        else if (L.length < 2) L.push(v);
+        else { toast('리더는 2명이에요. 바꾸려면 리더를 한 번 더 눌러 빼 주세요'); return; }
+        sfx.tick(); draw();
+      },
+      go: () => { if (L.length < 2) return; dftStart(L); sfx.fanfare(); go('ost'); toast(`🎬 OST 드래프트 시작! 맞히면 한 명씩 데려갑니다`, 3000); },
+      back: () => go('music'),
+    };
+  }
+  actions.back = () => go('music');
+  draw();
 };
 
 // ── 🔤 초성 퀴즈 ──
