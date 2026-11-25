@@ -62,7 +62,7 @@ input, textarea { font-family: inherit; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 10px; }
 @media (orientation: portrait) { .grid { grid-template-columns: repeat(2, 1fr); } }
 @media (orientation: landscape) and (max-height: 500px) {
-  .grid { grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .grid { grid-template-columns: repeat(6, 1fr); gap: 8px; }
   #main { padding-top: 8px; }
   .card { padding: 8px 6px; gap: 2px; }
   .card .ic { font-size: 26px; }
@@ -221,6 +221,25 @@ input, textarea { font-family: inherit; }
 .nbtn.dead { opacity: .35; text-decoration: line-through; }
 .nbtn.mafia { border-color: var(--bad); background: rgba(255, 92, 92, .2); }
 .night .stage { background: #05040c; }
+
+/* ── 🎁 상품 뽑기 ── */
+.gboxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; width: 100%; }
+.gbox { position: relative; aspect-ratio: 1; border-radius: 16px; border: 2px solid var(--gold); background: linear-gradient(135deg, #ff4d7e33, #7b5cff44);
+  font-size: clamp(34px, 9vmin, 64px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #fff; }
+.gbox:disabled { cursor: default; }
+.gbox .gnum { position: absolute; top: 6px; left: 10px; font-family: var(--title); font-size: clamp(16px, 3.6vmin, 26px); color: var(--gold); }
+.gbox.open { background: var(--panel); border-color: var(--panel-line); animation: pop .45s; }
+.gbox.open b { font-size: clamp(15px, 3.4vmin, 24px); word-break: keep-all; text-align: center; }
+.gbox.open small { font-size: clamp(12px, 2.6vmin, 16px); color: var(--muted); font-weight: 800; }
+.gbox.open.swap { border-color: var(--gold); background: rgba(255, 210, 63, .18); }
+.gbox.shaking { animation: shake .12s infinite; box-shadow: 0 0 30px var(--gold); }
+.gpool, .glist { display: flex; flex-direction: column; gap: 6px; }
+.glist .prow { grid-template-columns: 1fr auto; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .gboxes { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .gbox { font-size: 26px; border-radius: 12px; }
+  .gbox .gnum { font-size: 14px; top: 3px; left: 6px; }
+}
 
 /* ── 📺 다음 장면 맞히기 ── */
 .scene-box { width: 100%; flex: 1; min-height: 0; max-height: 100%; aspect-ratio: 16 / 9; max-width: calc((100vh - 170px) * 16 / 9);

@@ -297,6 +297,7 @@ const GAMES = [
   { key: 'mafia', ic: '🕵️', t: '마피아', d: '사회자 진행' },
   { key: 'liar', ic: '🤥', t: '라이어 게임', d: '거짓말쟁이를 찾아라' },
   // { key: 'tables', ic: '🏓', t: '탁구·당구', d: '2부 대항전' },
+  { key: 'gift', ic: '🎁', t: '상품 뽑기', d: '패배팀 랜덤 선물' },
   { key: 'roulette', ic: '🎰', t: '벌칙 룰렛', d: '운명의 룰렛' },
 ];
 
@@ -1546,6 +1547,144 @@ screens.allin = () => {
     };
   }
   betting();
+};
+
+// ── 🎁 패배팀 상품 뽑기 ──
+// 상자(보조배터리·와인·선물 교환권)를 섞어 놓고, 패배팀이 한 명씩 상자 번호를 골라 엽니다.
+// 🔄 선물 교환권: 이미 선물을 받은 사람 한 명을 골라 그 선물을 뺏어 오고, 뺏긴 사람은 남은 상자에서 다시 뽑습니다.
+screens.gift = () => {
+  let G = S.gift && S.gift.boxes ? S.gift : null, busy = false, playActs = null;
+  const persist = () => { S.gift = G; save(); };
+  const tms = []; const later = (fn, ms) => { tms.push(setTimeout(fn, ms)); };
+  onCleanup(() => tms.forEach(clearTimeout));
+  const closedReal = () => G.boxes.filter((b) => !b.open && !b.swap).length;
+  const holders = () => Object.keys(G.got).filter((n) => G.got[n] && !G.got[n].startsWith('😢'));
+
+  // ── 준비: 패배팀(점수 낮은 팀) 자동 선택 + 상자 개수 조정 ──
+  function setup() {
+    const [a, b] = S.teams.map((t) => t.score);
+    let team = G ? G.team : a === b ? 1 : a < b ? 0 : 1;
+    const pool = (Array.isArray(S.giftPool) ? S.giftPool : LOSER_GIFTS).map((x) => ({ ...x }));
+    function draw() {
+      const mem = teamMembers(team), boxes = pool.reduce((s, x) => s + x.c, 0), real = pool.filter((x) => !x.swap).reduce((s, x) => s + x.c, 0);
+      main.innerHTML = `
+        <div class="screen">
+          <div class="head"><h2>🎁 패배팀 상품 뽑기</h2><span class="sub">상자 ${boxes}개 · 선물 ${real}개 · ${esc(S.teams[team].name)} ${mem.length}명</span></div>
+          <div class="stage-wrap">
+            <div class="stage" style="gap:10px;align-items:stretch">
+              <div class="row">${[0, 1].map((t) => `<button class="btn ${t ? 'B' : 'A'} ${team === t ? 'on' : ''}" data-a="team" data-v="${t}">${esc(S.teams[t].name)} (${S.teams[t].score}점)${team === t ? ' ← 패배팀' : ''}</button>`).join('')}</div>
+              <div class="ngrid">${mem.map((n) => `<span class="nbtn ${team ? 'tB' : 'tA'}">${esc(n)}</span>`).join('') || '<p class="sub" style="color:var(--muted)">🎲 팀 나누기를 먼저 해 주세요</p>'}</div>
+              <div class="gpool">${pool.map((x, k) => `<div class="prow"><span>${esc(x.n)}</span><button data-a="cnt" data-v="${k}:-1">−</button><span class="pp">${x.c}</span><button data-a="cnt" data-v="${k}:1">＋</button></div>`).join('')}</div>
+              ${real < mem.length ? `<p class="notice" style="margin:0">⚠️ 선물(${real}개)이 인원(${mem.length}명)보다 적어요. 못 받는 사람이 생깁니다.</p>` : ''}
+              <p class="sub" style="margin:0;color:var(--muted)">🔄 선물 교환권: 이미 선물을 받은 사람의 선물을 뺏어 옵니다. 뺏긴 사람은 남은 상자에서 다시 뽑아요.</p>
+            </div>
+            <div class="controls">
+              <p class="notice" style="margin:0;text-align:center">🏆 우승팀: ${esc(PRIZE_INFO.win)}<br>👑 개인 우수상: ${esc(PRIZE_INFO.mvp)}</p>
+              <button class="btn big gold" data-a="start" ${mem.length ? '' : 'disabled'}>🎁 상자 섞고 시작!</button>
+              ${G && G.phase !== 'done' ? '<button class="btn" data-a="resume">▶ 진행 중이던 뽑기 이어서</button>' : ''}
+              <button class="btn" data-a="roulette">🎰 벌칙 룰렛</button>
+            </div>
+          </div>
+        </div>`;
+      setCtl({ q: `${S.teams[team].name} · 상자 ${boxes}개`, can: [{ a: 'start', l: '🎁 상자 섞고 시작!', k: 'big' }] });
+    }
+    actions = {
+      ...playActs,
+      team: (v) => { team = Number(v); draw(); },
+      cnt: (v) => { const [k, d] = v.split(':').map(Number); pool[k].c = Math.max(0, Math.min(10, pool[k].c + d)); S.giftPool = pool; save(); draw(); },
+      start: () => {
+        const mem = teamMembers(team);
+        if (!mem.length) return;
+        const boxes = shuffle(pool.flatMap((x) => Array.from({ length: x.c }, () => ({ p: x.n, swap: !!x.swap, open: false, by: null }))));
+        G = { team, boxes, queue: shuffle(mem), got: {}, log: [], phase: 'pick', swapper: null };
+        persist(); sfx.fanfare(); play();
+      },
+      resume: () => { if (G) play(); },
+      roulette: () => go('roulette'),
+    };
+    draw();
+  }
+
+  // ── 뽑기 ──
+  function play() {
+    actions = playActs;
+    if (G.phase !== 'done' && (!G.queue.length || (!closedReal() && G.phase === 'pick' && !G.boxes.some((b) => !b.open)))) G.phase = 'done';
+    const cur = G.queue[0], tc = G.team ? 'B' : 'A';
+    const done = G.phase === 'done', swap = G.phase === 'swap';
+    main.innerHTML = `
+      <div class="screen">
+        <div class="head"><h2>🎁 ${esc(S.teams[G.team].name)} 상품 뽑기</h2><span class="pill">남은 상자 ${G.boxes.filter((b) => !b.open).length}개</span></div>
+        <div class="stage-wrap">
+          <div class="stage" style="gap:10px">
+            <div class="result-big" id="gmsg" style="text-align:center;font-size:clamp(22px,6vmin,44px)">${done ? '🎉 모두 뽑았어요!'
+              : swap ? `🔄 ${esc(G.swapper)} 님, 누구 선물을 뺏을까요?` : `👉 <span style="color:var(--${tc})">${esc(cur)}</span> 님, 상자를 고르세요!`}</div>
+            <div class="gboxes">${G.boxes.map((b, k) => `<button class="gbox ${b.open ? 'open' + (b.swap ? ' swap' : '') : ''}" data-a="open" data-v="${k}" ${b.open || swap || done || busy ? 'disabled' : ''}>
+              ${b.open ? `<b>${esc(b.p)}</b><small>${esc(b.by || '')}</small>` : `<span class="gnum">${k + 1}</span>🎁`}</button>`).join('')}</div>
+            ${swap ? `<div class="ngrid">${holders().map((n) => `<button class="nbtn t${tc}" data-a="victim" data-v="${esc(n)}">${esc(n)}<small>${esc(G.got[n])}</small></button>`).join('')}</div>` : ''}
+          </div>
+          <div class="controls">
+            <div class="glist">${Object.keys(G.got).map((n) => `<div class="prow"><span>${esc(n)}</span><b>${esc(G.got[n])}</b></div>`).join('') || '<p class="sub" style="color:var(--muted);text-align:center">아직 아무도 안 뽑았어요</p>'}</div>
+            ${!done && G.queue.length > 1 ? `<p class="sub" style="margin:0;text-align:center;color:var(--muted)">다음 차례: ${G.queue.slice(1).map(esc).join(' → ')}</p>` : ''}
+            ${done ? `${G.boxes.some((b) => !b.open) ? `<p class="sub" style="margin:0;text-align:center;color:var(--muted)">남은 상자: ${G.boxes.filter((b) => !b.open).map((b) => esc(b.p)).join(', ')}</p>` : ''}
+              <button class="btn big gold" data-a="awards">🏆 시상식으로</button>` : ''}
+            <div class="row"><button class="btn" data-a="undo" ${G.log.length && !busy ? '' : 'disabled'}>↩️ 취소</button><button class="btn" data-a="setup">✏️ 처음부터</button></div>
+          </div>
+        </div>
+      </div>`;
+    setCtl({
+      q: done ? '뽑기 끝' : swap ? `🔄 ${G.swapper} 교환권` : `${cur} 차례`,
+      answer: done ? '' : swap ? '뺏을 사람을 고르세요' : `${cur} 님 차례`,
+      can: done ? [{ a: 'awards', l: '🏆 시상식으로', k: 'big' }]
+        : swap ? holders().map((n) => ({ a: 'victim', v: n, l: `🔄 ${n} (${G.got[n]})` }))
+          : G.boxes.map((b, k) => (b.open ? null : { a: 'open', v: String(k), l: `🎁 ${k + 1}번 상자` })).filter(Boolean),
+    });
+  }
+  const snap = () => { G.log.push(JSON.stringify({ boxes: G.boxes, queue: G.queue, got: G.got, phase: G.phase, swapper: G.swapper })); };
+
+  playActs = {
+    open: (v) => {
+      if (busy || G.phase !== 'pick') return;
+      const k = Number(v), box = G.boxes[k], who = G.queue[0];
+      if (!box || box.open || !who) return;
+      snap(); busy = true;
+      // 두구두구 1.2초 → 공개
+      const el = main.querySelector(`.gbox[data-v="${k}"]`); if (el) el.classList.add('shaking');
+      for (let i = 0; i < 10; i++) later(() => tone(200 + (i % 2) * 40, 0.06, 'triangle', 0.25), i * 110);
+      later(() => {
+        busy = false; box.open = true; box.by = who;
+        if (box.swap) {
+          if (holders().length) { G.phase = 'swap'; G.swapper = who; sfx.go(); flash('var(--gold)'); toast(`🔄 선물 교환권! ${who} 님이 다른 사람의 선물을 뺏어 올 수 있어요`, 3500); }
+          else { sfx.beep(); toast(`🔄 교환권이지만 아직 선물 받은 사람이 없어요! ${who} 님은 한 번 더 뽑으세요`, 3500); }
+        } else {
+          G.got[who] = box.p; G.queue.shift(); sfx.fanfare(); flash(`var(--${G.team ? 'B' : 'A'})`);
+          if (G.queue.length && !closedReal()) G.queue.forEach((n) => { G.got[n] = '😢 꽝 (상품 소진)'; }), (G.queue = []);
+        }
+        persist(); play();
+      }, 1300);
+      persist();
+    },
+    victim: (v) => {
+      if (G.phase !== 'swap' || !G.got[v]) return;
+      snap();
+      const sw = G.swapper;
+      const stolen = G.boxes.find((b) => b.open && !b.swap && b.by === v && b.p === G.got[v]);
+      if (stolen) stolen.by = `${v} → ${sw}`; // 상자에 "뺏김" 표시
+      G.got[sw] = G.got[v]; delete G.got[v];
+      G.queue.shift();                 // 교환권 쓴 사람은 끝
+      G.queue.unshift(v);              // 뺏긴 사람이 바로 다시 뽑음
+      if (!closedReal()) { G.got[v] = '😢 꽝 (상품 소진)'; G.queue.shift(); }
+      G.phase = 'pick'; G.swapper = null; sfx.boom(); flash('var(--bad)');
+      toast(`🔄 ${sw} 님이 ${v} 님의 ${G.got[sw]}을(를) 가져갔어요! ${v} 님 다시 뽑기`, 3500);
+      persist(); play();
+    },
+    undo: () => {
+      if (busy || !G.log.length) return;
+      Object.assign(G, JSON.parse(G.log.pop())); sfx.tick(); persist(); play();
+    },
+    setup: () => { if (G && G.phase !== 'done' && !confirm('뽑기를 처음부터 다시 할까요?')) return; G = null; S.gift = null; save(); setup(); },
+    awards: () => go('awards'),
+  };
+  setup();
 };
 
 // ── 🎰 벌칙 룰렛 ──
@@ -2872,6 +3011,7 @@ screens.awards = () => {
     if (s === 'intro') body = `<div class="medal">🏆</div><div class="names-big">시상식</div><p class="notice" style="margin:0">팀 우승 → 개인 3위 → 2위 → 1위(MVP) 순서로 공개합니다</p>`;
     else if (s === 'team') body = drum ? '<div class="medal drumroll">🥁</div><div class="names-big">팀 우승은…</div>'
       : `<div class="medal pop">${win == null ? '🤝' : '🏆'}</div><div class="names-big pop">${win == null ? '공동 우승!' : esc(S.teams[win].name) + ' 우승!'}</div>
+         <p class="notice pop" style="margin:0">🎁 ${esc(PRIZE_INFO.win)}</p>
          <div class="answer">${esc(S.teams[0].name)} ${a} : ${b} ${esc(S.teams[1].name)}</div>`;
     else if (s === 'end') body = `<div class="names-big">🎉 모두 수고하셨습니다!</div>
       <div class="sc-list" style="width:min(520px,100%)">${win == null ? '' : `<div class="sc-row"><span>🏆</span><span>팀 우승</span><b>${esc(S.teams[win].name)}</b></div>`}
@@ -2880,7 +3020,8 @@ screens.awards = () => {
       const g = top[s];
       body = drum ? `<div class="medal drumroll">🥁</div><div class="names-big">개인 ${MED[s][1]}는…</div>`
         : `<div class="medal pop">${MED[s][0]}</div><p class="notice" style="margin:0">개인 ${MED[s][1]}${g.list.length > 1 ? ` (공동 ${g.list.length}명)` : ''}</p>
-           <div class="names-big pop">${g.list.map(tag).join('<br>')}</div><div class="answer">${g.p}점</div>`;
+           <div class="names-big pop">${g.list.map(tag).join('<br>')}</div><div class="answer">${g.p}점</div>
+           ${s === 0 ? `<p class="notice pop" style="margin:0">🎁 개인 우수상: ${esc(PRIZE_INFO.mvp)}${g.list.length > 1 ? ' (공동 수상 — 사회자가 정해 주세요)' : ''}</p>` : ''}`;
     }
     main.innerHTML = `
       <div class="screen">
@@ -2888,7 +3029,7 @@ screens.awards = () => {
         <div class="stage award-stage">${body}</div>
         <div class="row" style="margin-top:8px">
           ${k > 0 ? '<button class="btn" data-a="prev">◀ 이전</button>' : ''}
-          ${s === 'end' ? `<button class="btn primary" data-a="phones">📱 폰에 전체 순위 공개</button><button class="btn" data-a="board">🏅 점수판</button>`
+          ${s === 'end' ? `<button class="btn gold" data-a="gift">🎁 패배팀 상품 뽑기</button><button class="btn primary" data-a="phones">📱 폰에 전체 순위 공개</button><button class="btn" data-a="board">🏅 점수판</button>`
             : `<button class="btn big gold" data-a="next" ${drum ? 'disabled' : ''}>${s === 'intro' ? '🥁 시작!' : '다음 공개 ▶'}</button>`}
         </div>
       </div>`;
@@ -2906,6 +3047,7 @@ screens.awards = () => {
     prev: () => { timers.forEach(clearTimeout); timers = []; if (k > 0) { k--; show(false); } },
     phones: () => { S.scoreShow = 'all'; save(); pushScores(); toast('📱 참가자 폰에 팀 점수와 개인 순위를 공개했어요'); },
     board: () => go('scores'),
+    gift: () => go('gift'),
   };
   if (!groups.length) toast('아직 개인 포인트를 받은 사람이 없어요. 팀 우승만 발표합니다', 3500);
   show(false);
