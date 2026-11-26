@@ -323,8 +323,9 @@ const GAMES = [
   // { key: 'draw', ic: '🎨', t: '캐치마인드', d: '릴레이 그림 퀴즈' },
   // { key: 'bomb', ic: '💣', t: '폭탄 돌리기', d: '터지면 벌칙!' },
   // { key: 'allin', ic: '🔥', t: '올인 역전', d: '마지막 대역전' },
-  { key: 'mafia', ic: '🕵️', t: '마피아', d: '사회자 진행' },
-  { key: 'liar', ic: '🤥', t: '라이어 게임', d: '거짓말쟁이를 찾아라' },
+  // hide: 홈에 기본으로 안 보임 → ⚙️ 설정의 "마피아·라이어 홈에 보이기"를 켜면 나옴
+  { key: 'mafia', ic: '🕵️', t: '마피아', d: '사회자 진행', hide: true },
+  { key: 'liar', ic: '🤥', t: '라이어 게임', d: '거짓말쟁이를 찾아라', hide: true },
   // { key: 'tables', ic: '🏓', t: '탁구·당구', d: '2부 대항전' },
   { key: 'gift', ic: '🎁', t: '상품 뽑기', d: '패배팀 랜덤 선물' },
   { key: 'roulette', ic: '🎰', t: '벌칙 룰렛', d: '운명의 룰렛' },
@@ -338,7 +339,7 @@ screens.home = () => {
     <div class="screen">
       <div class="hero"><h1>🎉 워크샵 파티 쇼</h1></div>
       <div class="grid">
-        ${GAMES.map((g) => `<button class="card" data-a="open" data-v="${g.key}"><span class="ic">${g.ic}</span><span class="t">${g.t}</span><span class="d">${g.d}</span></button>`).join('')}
+        ${GAMES.filter((g) => !g.hide || S.showHidden).map((g) => `<button class="card" data-a="open" data-v="${g.key}"><span class="ic">${g.ic}</span><span class="t">${g.t}</span><span class="d">${g.d}</span></button>`).join('')}
       </div>
       <div class="tools">
         <button class="btn ${ytUnlocked ? 'ok' : 'gold'}" data-a="sound">${ytUnlocked ? '✅ 사운드 준비됨' : '🔊 사운드 준비 (먼저!)'}</button>
@@ -3144,6 +3145,10 @@ screens.settings = () => {
           <input id="ssid" value="${esc((S.wifi && S.wifi.ssid) || '')}" placeholder="Wi-Fi 이름 (대소문자·띄어쓰기 그대로)" autocomplete="off" spellcheck="false">
           <input id="wpass" value="${esc((S.wifi && S.wifi.pass) || '')}" placeholder="비밀번호" autocomplete="off" spellcheck="false">
         </div>
+        <label>홈 화면에 보일 게임</label>
+        <div class="row" style="justify-content:flex-start">
+          <button class="btn ${S.showHidden ? 'on' : ''}" data-a="hidden">🕵️ 마피아 · 🤥 라이어 홈에 보이기: <b>${S.showHidden ? 'ON' : 'OFF'}</b></button>
+        </div>
         <label>벌칙 룰렛 항목 (한 줄에 하나)</label>
         <textarea id="pen">${esc(S.penalties.join('\n'))}</textarea>
         <div class="row">
@@ -3165,6 +3170,11 @@ screens.settings = () => {
       save(); renderScore(); pushScores(); sfx.ok(); toast('저장했어요');
     },
     resetPen: () => { $('#pen').value = DEFAULT_PENALTIES.join('\n'); },
+    hidden: (v, el) => { // 누르면 바로 저장 (다른 입력칸은 그대로)
+      S.showHidden = !S.showHidden; save(); sfx.ok();
+      el.classList.toggle('on', S.showHidden); el.querySelector('b').textContent = S.showHidden ? 'ON' : 'OFF';
+      toast(S.showHidden ? '홈에 마피아·라이어가 보여요' : '홈에서 마피아·라이어를 숨겼어요');
+    },
     resetScore: () => {
       if (!confirm('팀 점수(0:0)와 개인 포인트를 모두 초기화할까요?\n(노래·OST·초성·사진 퀴즈에서 푼 문제 기록도 처음으로 돌아갑니다)')) return;
       S.teams.forEach((t) => { t.score = 0; }); S.indiv = {}; S.chosungDone = {}; S.chosungPos = {}; S.quizDone = {}; S.quizPos = {};
