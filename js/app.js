@@ -1808,7 +1808,7 @@ screens.gift = () => {
               ${pool.some((x) => x.swap) ? `<p class="sub" style="margin:0;color:var(--muted)">🔄 선물 교환권: 이미 선물을 받은 사람의 선물을 뺏어 옵니다. 뺏긴 사람은 남은 상자에서 다시 뽑아요.</p>` : ''}
             </div>
             <div class="controls">
-              <p class="notice" style="margin:0;text-align:center">🏆 우승팀: ${esc(PRIZE_INFO.win)}<br>👑 개인 우수상: ${esc(PRIZE_INFO.mvp)}</p>
+              <p class="notice" style="margin:0;text-align:center">🏆 우승팀: ${esc(PRIZE_INFO.win)}<br>👑 MVP (개인 점수 1위): ${esc(PRIZE_INFO.mvp)}</p>
               <button class="btn big gold" data-a="start" ${mem.length ? '' : 'disabled'}>🎁 상자 섞고 시작!</button>
               ${G && G.phase !== 'done' ? '<button class="btn" data-a="resume">▶ 진행 중이던 뽑기 이어서</button>' : ''}
               <button class="btn" data-a="roulette">🎰 벌칙 룰렛</button>
@@ -3259,7 +3259,7 @@ screens.awards = () => {
       body = drum ? `<div class="medal drumroll">🥁</div><div class="names-big">개인 ${MED[s][1]}는…</div>`
         : `<div class="medal pop">${MED[s][0]}</div><p class="notice" style="margin:0">개인 ${MED[s][1]}${g.list.length > 1 ? ` (공동 ${g.list.length}명)` : ''}</p>
            <div class="names-big pop">${g.list.map(tag).join('<br>')}</div><div class="answer">${g.p}점</div>
-           ${s === 0 ? `<p class="notice pop" style="margin:0">🎁 개인 우수상: ${esc(PRIZE_INFO.mvp)}${g.list.length > 1 ? ' (공동 수상 — 사회자가 정해 주세요)' : ''}</p>` : ''}`;
+           ${s === 0 ? `<p class="notice pop" style="margin:0">🎁 MVP (개인 점수 1위): ${esc(PRIZE_INFO.mvp)}${g.list.length > 1 ? ' (공동 수상 — 사회자가 정해 주세요)' : ''}</p>` : ''}`;
     }
     main.innerHTML = `
       <div class="screen">
