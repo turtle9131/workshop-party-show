@@ -439,7 +439,7 @@ async function partyApi(route, req, res, q) {
 
   // 참가자: 이름·팀으로 접속 (같은 이름은 한 명만)
   if (route === 'join') {
-    let name = String(b.name || '').trim().replace(/\s+/g, ' ').slice(0, 20); const team = Number(b.team);
+    let name = String(b.name || '').replace(/\s+/g, '').slice(0, 20); const team = Number(b.team); // 이름 공백은 모두 지움
     { // 명단과 띄어쓰기만 다르면 명단 표기로 맞춤 (점수가 같은 사람에게 쌓이도록)
       const nz = (x) => String(x).replace(/\s+/g, ''), list = P.roster ? [...P.roster[0], ...P.roster[1]] : P.players || [];
       const ex = list.find((x) => nz(x) === nz(name)); if (ex) name = ex;

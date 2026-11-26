@@ -73,7 +73,7 @@
         document.getElementById('re').onclick = () => lobby();
         const inp = document.getElementById('nm');
         const go = () => {
-          name = inp.value.trim().replace(/\s+/g, ' ');
+          name = norm(inp.value); // 공백은 모두 지움 ("김 철 수" → "김철수")
           if (!name) return alert('이름을 입력해 주세요');
           if ([...taken].some((x) => norm(x) === norm(name))) return alert('이미 같은 이름으로 접속한 사람이 있어요.\n본인이라면 사회자에게 말해 주세요. (다른 사람이면 성까지 적어 주세요)');
           if (solo) return join(name, -1);
@@ -87,6 +87,11 @@
         if (inp) {
           document.getElementById('go').onclick = go;
           inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+          inp.addEventListener('input', (e) => { // 입력 중에도 공백은 바로 지움 (한글 조합 중에는 건드리지 않음)
+            if (e.isComposing || !/\s/.test(inp.value)) return;
+            const pos = inp.selectionStart - (inp.value.slice(0, inp.selectionStart).match(/\s/g) || []).length;
+            inp.value = norm(inp.value); inp.setSelectionRange(pos, pos);
+          });
           setTimeout(() => inp.focus(), 50);
         }
         main.querySelectorAll('[data-team]').forEach((b) => b.addEventListener('click', () => join(name, Number(b.dataset.team))));
