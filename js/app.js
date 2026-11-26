@@ -1279,10 +1279,14 @@ screens.sceneEdit = () => {
 
 // ── 🎭 몸으로 말해요 ──
 const usedWords = new Set();
+const charTurn = [0, 0]; // 팀별로 맞히는 사람 차례 (라운드마다 다음 사람)
 screens.charades = () => {
   const cats = Object.keys(CHARADES);
   const MODES = ['몸으로 말해요', '고요 속의 외침', '말로 설명 (스피드 퀴즈)'];
   let cat = cats[0], mode = MODES[0], team = 0, secs = 90;
+  const RULE = { '몸으로 말해요': '말·소리 없이 몸으로만', '고요 속의 외침': '🎧 헤드폰 쓴 사람에게 입 모양으로', '말로 설명 (스피드 퀴즈)': '제시어 단어는 말하면 안 돼요' };
+  const mem = () => teamMembers(team);
+  const guesser = () => { const m = mem(); return m.length ? m[charTurn[team] % m.length] : ''; };
 
   function setup() {
     main.innerHTML = `
@@ -1301,7 +1305,8 @@ screens.charades = () => {
               <button class="btn A ${team === 0 ? 'on' : ''}" data-a="team" data-v="0">${esc(S.teams[0].name)} 차례</button>
               <button class="btn B ${team === 1 ? 'on' : ''}" data-a="team" data-v="1">${esc(S.teams[1].name)} 차례</button>
             </div>
-            <p class="notice" style="margin:0;text-align:center">📺 맞히는 팀원은 TV를 등지고, 설명하는 사람만 TV를 보세요!</p>
+            ${mem().length ? `<div class="chips" style="justify-content:center">🙋 맞힐 사람: ${mem().map((n, k) => `<button class="chip ${n === guesser() ? 'on' : ''}" data-a="who" data-v="${k}">${esc(n)}</button>`).join('')}</div>` : ''}
+            <p class="notice" style="margin:0;text-align:center">🙋 ${guesser() ? `<b>${esc(guesser())}</b> 님이 앞으로 나와 TV를 등지고 맞힙니다` : '맞히는 1명이 앞으로 나와 TV를 등지고 맞힙니다'}<br>나머지 팀원은 TV를 보고 설명하세요! <small style="color:var(--muted)">(${RULE[mode]})</small></p>
             <button class="btn big primary" data-a="start">▶ 시작!</button>
           </div>
         </div>
@@ -1309,23 +1314,27 @@ screens.charades = () => {
     actions = {
       cat: (v) => { cat = v; setup(); }, mode: (v) => { mode = v; setup(); },
       secs: (v) => { secs = Number(v); setup(); }, team: (v) => { team = Number(v); setup(); },
+      who: (v) => { charTurn[team] = Number(v); setup(); },
       start: () => play(),
     };
-    setCtl({ q: `${S.teams[team].name} 차례 · ${cat}`, can: [
-      { a: 'team', v: '0', l: `${S.teams[0].name} 차례` }, { a: 'team', v: '1', l: `${S.teams[1].name} 차례` }, { a: 'start', l: '▶ 시작!', k: 'big' }] });
+    setCtl({ q: `${S.teams[team].name} 차례 · ${cat}${guesser() ? ` · 🙋 ${guesser()}` : ''}`, can: [
+      { a: 'team', v: '0', l: `${S.teams[0].name} 차례` }, { a: 'team', v: '1', l: `${S.teams[1].name} 차례` },
+      ...mem().slice(0, 16).map((n, k) => ({ a: 'who', v: String(k), l: `${n === guesser() ? '🙋 ' : ''}${n}` })),
+      { a: 'start', l: '▶ 시작!', k: 'big' }] });
   }
 
   function play() {
     let pool = shuffle(CHARADES[cat].filter((w) => !usedWords.has(w)));
     if (pool.length < 5) { CHARADES[cat].forEach((w) => usedWords.delete(w)); pool = shuffle(CHARADES[cat]); }
     const log = []; let word = null, left = secs, running = false;
+    const who = guesser();
     const nextWord = () => { word = pool.shift() || null; if (word) usedWords.add(word); };
 
     function render() {
       const ok = log.filter((l) => l.ok).length;
       main.innerHTML = `
         <div class="screen">
-          <div class="head"><h2>${esc(mode)}</h2><span class="pill">${esc(S.teams[team].name)} · ${esc(cat)}</span></div>
+          <div class="head"><h2>${esc(mode)}</h2><span class="pill">${esc(S.teams[team].name)}${who ? ` · 🙋 ${esc(who)}` : ''} · ${esc(cat)}</span></div>
           <div class="stage-wrap">
             <div class="stage">
               <div class="timer ${left <= 10 ? 'warn' : ''}" id="tm">${running ? left : ''}</div>
@@ -1339,7 +1348,7 @@ screens.charades = () => {
             </div>
           </div>
         </div>`;
-      setCtl({ q: `${S.teams[team].name} · ⭕ ${ok}개`, answer: running ? (word || '제시어 소진') : '', can: [
+      setCtl({ q: `${S.teams[team].name}${who ? ` · 🙋 ${who}` : ''} · ⭕ ${ok}개`, answer: running ? (word || '제시어 소진') : '', can: [
         { a: 'ok', l: '⭕ 정답', k: 'big' }, { a: 'pass', l: '⏭ 패스' }, { a: 'quit', l: '그만하기' }] });
     }
     function finish() {
@@ -1347,7 +1356,7 @@ screens.charades = () => {
       const ok = log.filter((l) => l.ok).length;
       main.innerHTML = `
         <div class="screen">
-          <div class="head"><h2>⏰ 시간 종료!</h2><span class="pill">${esc(S.teams[team].name)}</span></div>
+          <div class="head"><h2>⏰ 시간 종료!</h2><span class="pill">${esc(S.teams[team].name)}${who ? ` · 🙋 ${esc(who)}` : ''}</span></div>
           <div class="stage">
             <div class="answer pop">${ok}개 정답!</div>
             <div class="results">${log.map((l) => `<span class="${l.ok ? 'o' : 'x'}">${esc(l.w)}</span>`).join('')}</div>
@@ -1361,7 +1370,7 @@ screens.charades = () => {
         ...(applied ? [] : [{ a: 'apply', l: `${S.teams[team].name}에 +${ok}점 반영`, k: 'big' }]), { a: 'again', l: '다음 라운드' }] });
       actions = {
         apply: (v, el) => { addScore(team, ok); sfx.fanfare(); el.disabled = true; el.textContent = '✅ 반영 완료'; ctlEnd(true); },
-        again: () => { team = 1 - team; setup(); },
+        again: () => { charTurn[team]++; team = 1 - team; setup(); }, // 이번 팀은 다음 사람이 맞힐 차례
       };
       ctlEnd(false);
     }
